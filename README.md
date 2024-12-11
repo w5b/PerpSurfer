@@ -115,7 +115,7 @@ npm install -g pnpm
 Install the project:
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/PerpSurfer.git
+git clone https://github.com/SurfSolana/PerpSurfer
 cd PerpSurfer
 
 # Install dependencies
