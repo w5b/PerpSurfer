@@ -1,6 +1,6 @@
 import winston from 'winston';
 import TelegramBot from 'node-telegram-bot-api';
-import { TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID } from './config.js';
+import { TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID } from '../config/config.js';
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 

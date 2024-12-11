@@ -21,7 +21,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import dotenv from "dotenv";
-import logger from "./logger.js";
+import logger from "../utils/logger.js";
 import {
   BN,
   PriorityFeeMethod,
