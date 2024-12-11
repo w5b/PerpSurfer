@@ -532,8 +532,8 @@ Opening ${direction} position:
 				})
 			);
 
-			const triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-			const triggerBit_SL = this.client.findAvailableTriggerOrderBit(
+			let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
+			let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
 				triggerBit_TP + 1
 			);
 
