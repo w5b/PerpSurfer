@@ -1,0 +1,22 @@
+{
+  "name": "PerpSurfer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@drift-labs/sdk": "2.104.0-beta.8",
+    "@solana/web3.js": "^1.95.8",
+    "@zetamarkets/sdk": "^1.55.0",
+    "dotenv": "^16.4.7",
+    "fs": "0.0.1-security",
+    "node-telegram-bot-api": "^0.66.0",
+    "winston": "^3.17.0",
+    "ws": "^8.18.0"
+  }
+}

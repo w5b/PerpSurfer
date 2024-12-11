@@ -1,0 +1,21 @@
+# DotEnv Configuration File
+# Save this file as .env and set values below
+
+# Trading Signals API
+# Register for a key with TheSURFmack on Discord
+WS_API_KEY=
+WS_HOST=api.nosol.lol  
+WS_PORT=8080
+
+# Optional Telegram Notifications
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+ADMIN_CHAT_ID=
+
+# RPC Connection
+RPC_TRADINGBOT= 
+
+# Wallet Files (Object like [100,101,102...])
+# SolFlare exports these values as Private Key
+KEYPAIR_FILE_PATH_LONG= # /full/path/to/wallet/long.json
+KEYPAIR_FILE_PATH_SHORT= # /full/path/to/wallet/long.json
