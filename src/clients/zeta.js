@@ -606,7 +606,7 @@ Opening ${direction} position:
 	}
 
 	fetchSettings() {
-		logger.info("Using settings:", this.settings); // Debug log
+		// logger.info("Using settings:", this.settings); // Debug log
 		return this.settings;
 	}
 
@@ -642,21 +642,6 @@ Opening ${direction} position:
 		const stopLossTrigger = isLong
 			? price - (price - stopLossPrice) * 0.9
 			: price + (stopLossPrice - price) * 0.9;
-
-		// Log results in both formats for verification
-		console.log(`
-  Opening ${direction} position:
-  ------------------------------
-      Take Profit ⟶ $${(takeProfitPrice / 1e6).toFixed(4)}
-                        ↑ 
-      TP Trigger ⟶ $${(takeProfitTrigger / 1e6).toFixed(4)}
-                        ↑ 
-  -------- Entry ⟶ $${(price / 1e6).toFixed(4)} -----
-                        ↓
-      SL Trigger ⟶ $${(stopLossTrigger / 1e6).toFixed(4)}
-                        ↓
-        SL Price ⟶ $${(stopLossPrice / 1e6).toFixed(4)}
-  ------------------------------`);
 
 		return {
 			takeProfitPrice,
