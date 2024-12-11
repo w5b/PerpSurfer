@@ -303,9 +303,19 @@ If configured, Telegram notifications will inform you about:
 Security Practices:
 1. Use dedicated trading wallets only
 2. Keep your API keys secure
-3. Regularly backup your wallet files
+3. Keep your wallet private keys secure
 4. Monitor your positions regularly
-5. Keep your system updated
+
+## Track wallets without logging in
+
+You can easily track multiple wallets on zeta by going to the following links.
+
+Set your *PUBLIC* key in the URL:
+
+- https://dex.zeta.markets/portfolio/YOUR_LONG_WALLET_PUBLIC_KEY
+
+- https://dex.zeta.markets/portfolio/YOUR_SHORT_WALLET_PUBLIC_KEY
+
 
 ## Support
 
