@@ -32,7 +32,7 @@ function validateEnvironment() {
                 default: {
                     type: "fixed",
                     takeProfit: 0.036,
-                    stopLoss: 0.01,
+                    stopLoss: 0.018,
                     triggers: {
                         at: 0.60,
                         moveStopLossTo: 0.40
