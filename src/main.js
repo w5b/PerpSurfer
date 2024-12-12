@@ -970,8 +970,8 @@ async function initializeExchange(markets) {
 			connection,
 			{
 				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
+				preflightCommitment: "confirmed",
+				commitment: "confirmed",
 			},
 			25, // 50rps chainstack = 20ms delay, set to 25 for funzies
 			true,
@@ -993,6 +993,9 @@ async function initializeExchange(markets) {
 		throw error;
 	}
 }
+
+
+
 
 const priorityFeesConnection = new Connection(process.env.RPC_TRADINGBOT);
 
@@ -1094,6 +1097,9 @@ async function updatePriorityFees() {
 		throw error;
 	}
 }
+
+
+
 
 /**
  * Main execution function

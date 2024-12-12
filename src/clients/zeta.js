@@ -41,7 +41,7 @@ export class ZetaClientWrapper {
 		this.use_db_settings = true;
 
 		this.priorityFees = null;
-		this.priorityFeeMultiplier = 5;
+		this.priorityFeeMultiplier = 8;
 		this.currentPriorityFee = 5_000;
 
 		this.monitoringInterval = null;
@@ -126,8 +126,8 @@ export class ZetaClientWrapper {
 				connection,
 				{
 					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
+					preflightCommitment: "confirmed",
+					commitment: "confirmed",
 				},
 				150,
 				true,
@@ -678,8 +678,8 @@ Opening ${direction} position:
 				undefined,
 				{
 					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
+					preflightCommitment: "confirmed",
+					commitment: "confirmed",
 				},
 				false,
 				utils.getZetaLutArr()
