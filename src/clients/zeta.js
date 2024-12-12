@@ -65,15 +65,10 @@ export class ZetaClientWrapper {
 		};
 	}
 
-	roundToTickSize(nativePrice) {
-		// Convert from native integer to decimal first
-		const decimalPrice = nativePrice / 1e6;
-		// Round to the nearest tick (0.0001)
-		const tickSize = 0.0001;
-		const roundedDecimal = Math.round(decimalPrice / tickSize) * tickSize;
-		// Convert back to native integer
-		return Math.round(roundedDecimal * 1e6);
-	}
+  roundToTickSize(price) {
+    const tickSize = 0.0001;
+    return Math.round(price / tickSize) * tickSize;
+  }
 
 	async initializeClient(keypairPath = null) {
 		const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;
@@ -609,38 +604,50 @@ Opening ${direction} position:
 		const isLong = direction === "long";
 
 		// Calculate take profit levels
-		const takeProfitPrice = isLong
+		let takeProfitPrice = isLong
 			? price * (1 + takeProfitPercentage) // Long: Entry + TP%
-			: price * (1 - takeProfitPercentage); // Short: Entry - TP%
+			: price * (1 - takeProfitPercentage) // Short: Entry - TP%
+    ;
 
-		const takeProfitTrigger = isLong
+		let takeProfitTrigger = isLong
 			? price + (takeProfitPrice - price) * 0.95 // Long: Entry + 95% of distance to TP
-			: price - (price - takeProfitPrice) * 0.95; // Short: Entry - 95% of distance to TP
+			: price - (price - takeProfitPrice) * 0.95 // Short: Entry - 95% of distance to TP
+    ;
 
 		// Calculate stop loss levels
-		const stopLossPrice = isLong
+		let stopLossPrice = isLong
 			? price * (1 - stopLossPercentage) // Long: Entry - SL%
-			: price * (1 + stopLossPercentage); // Short: Entry + SL%
+			: price * (1 + stopLossPercentage) // Short: Entry + SL%
+    ;
 
-		const stopLossTrigger = isLong
+		let stopLossTrigger = isLong
 			? price - (price - stopLossPrice) * 0.95 // Long: Entry - 95% of distance to SL
-			: price + (stopLossPrice - price) * 0.95; // Short: Entry + 95% of distance to SL
+			: price + (stopLossPrice - price) * 0.95 // Short: Entry + 95% of distance to SL
+    ;
+
+    stopLossPrice   = this.roundToTickSize(stopLossPrice);
+    stopLossTrigger = this.roundToTickSize(stopLossTrigger);
+
+    takeProfitPrice   = this.roundToTickSize(stopLossPrice);
+    takeProfitTrigger = this.roundToTickSize(stopLossTrigger);
 
 		// Log calculations for verification
-		// console.log("TP/SL Price Calculations:", {
-		// 	direction,
-		// 	entryPrice: price,
-		// 	takeProfit: {
-		// 		price: takeProfitPrice,
-		// 		trigger: takeProfitTrigger,
-		// 		percentage: takeProfitPercentage * 100,
-		// 	},
-		// 	stopLoss: {
-		// 		price: stopLossPrice,
-		// 		trigger: stopLossTrigger,
-		// 		percentage: stopLossPercentage * 100,
-		// 	},
-		// });
+		console.log("TP/SL Price Calculations:", {
+			direction,
+			entryPrice: price,
+			takeProfit: {
+				price: takeProfitPrice,
+				trigger: takeProfitTrigger,
+				percentage: Number(takeProfitPercentage * 100).toFixed(2),
+			},
+			stopLoss: {
+				price: stopLossPrice,
+				trigger: stopLossTrigger,
+				percentage: Number(stopLossPercentage * 100).toFixed(2),
+			},
+		});
+
+    
 
 		return {
 			takeProfitPrice,
@@ -706,14 +713,15 @@ Opening ${direction} position:
 
 		// Calculate adjusted price with slippage
 		const slippage = 0.0001;
-		const adjustedPrice =
+		const adjustedPrice = this.roundToTickSize(
 			makerOrTaker === "maker"
 				? side === types.Side.BID
 					? currentPrice + slippage
 					: currentPrice - slippage
 				: side === types.Side.BID
 				? currentPrice * (1 + slippage * 5)
-				: currentPrice * (1 - slippage * 5);
+				: currentPrice * (1 - slippage * 5)
+    );
 
 		// Determine leverage based on market
 		const isMainAsset =
@@ -741,10 +749,10 @@ Opening ${direction} position:
 		const actualPositionSize = lotSize * decimalMinLotSize;
 
 		logger.info("Position size calculation:", {
-			rawSize: rawPositionSize.toFixed(4),
+			rawSize: rawPositionSize,
 			minLotSize: decimalMinLotSize,
 			lotSize,
-			finalSize: actualPositionSize.toFixed(4),
+			finalSize: actualPositionSize,
 			nativeLotSize: nativeLotSize.toString(),
 			effectiveValue: (actualPositionSize * currentPrice).toFixed(2),
 			effectiveLeverage:
