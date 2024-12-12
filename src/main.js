@@ -113,37 +113,32 @@ class MultiTradingManager {
 	 */
 	// Inside MultiTradingManager class
 	async initialize(symbols) {
-		try {
-			this.symbols = symbols;
-			console.log("[INIT] Initializing Multi-Trading Manager", {
-				symbols: this.symbols,
-				longWallet: process.env.KEYPAIR_FILE_PATH_LONG,
-				shortWallet: process.env.KEYPAIR_FILE_PATH_SHORT,
-			});
+		this.symbols = symbols;
+		console.log("[INIT] Initializing Multi-Trading Manager", {
+			symbols: this.symbols,
+			longWallet: process.env.KEYPAIR_FILE_PATH_LONG,
+			shortWallet: process.env.KEYPAIR_FILE_PATH_SHORT,
+		});
 
-			// Initialize both trading directions
-			this.longManager = new DirectionalTradingManager("long", this.symbols);
-			await this.longManager.initialize();
+		// Initialize both trading directions
+		this.longManager = new DirectionalTradingManager("long", this.symbols);
+		await this.longManager.initialize();
 
-			this.shortManager = new DirectionalTradingManager("short", this.symbols);
-			await this.shortManager.initialize();
+		this.shortManager = new DirectionalTradingManager("short", this.symbols);
+		await this.shortManager.initialize();
 
-			// Do position check after both managers are initialized
-			logger.info("[INIT] Checking existing positions");
-			await this.longManager.checkExistingPositions();
-			await this.shortManager.checkExistingPositions();
+		// Do position check after both managers are initialized
+		logger.info("[INIT] Checking existing positions");
+		await this.longManager.checkExistingPositions();
+		await this.shortManager.checkExistingPositions();
 
-			this.setupWebSocket();
-			this.setupHealthCheck();
+		this.setupWebSocket();
+		this.setupHealthCheck();
 
-			logger.info("[INIT] Trading system initialized successfully", {
-				symbols: this.symbols,
-				timestamp: new Date().toISOString(),
-			});
-		} catch (error) {
-			logger.error("[INIT] Critical initialization error:", error);
-			throw error;
-		}
+		logger.info("[INIT] Trading system initialized successfully", {
+			symbols: this.symbols,
+			timestamp: new Date().toISOString(),
+		});
 	}
 
 	/**
@@ -188,36 +183,32 @@ class MultiTradingManager {
 
 		// Handle incoming messages
 		this.ws.on("message", async (data) => {
-			try {
-				const signalData = JSON.parse(data.toString());
+			const signalData = JSON.parse(data.toString());
 
-				// Handle connection acknowledgment
-				if (signalData.type === "connection") {
-					console.log("[WS] Server acknowledged connection:", {
-						availableSymbols: signalData.symbols,
-					});
-					return;
-				}
-
-				// Only queue signals for symbols we're actually trading
-				if (!this.symbols.includes(signalData.symbol)) {
-					// console.log(`[WS] Ignoring signal for untracked symbol: ${signalData.symbol}`);
-					return;
-				}
-
-				// Queue management - drop oldest if full
-				if (this.messageQueue.length >= MAX_QUEUE_SIZE) {
-					console.log("[WS] Queue full, dropping oldest message");
-					this.messageQueue.shift();
-				}
-
-				this.messageQueue.push(signalData);
-				console.log(`[WS] Queued signal for ${signalData.symbol}`);
-
-				await this.processMessageQueue();
-			} catch (error) {
-				logger.error("[WS] Error processing message:", error);
+			// Handle connection acknowledgment
+			if (signalData.type === "connection") {
+				console.log("[WS] Server acknowledged connection:", {
+					availableSymbols: signalData.symbols,
+				});
+				return;
 			}
+
+			// Only queue signals for symbols we're actually trading
+			if (!this.symbols.includes(signalData.symbol)) {
+				// console.log(`[WS] Ignoring signal for untracked symbol: ${signalData.symbol}`);
+				return;
+			}
+
+			// Queue management - drop oldest if full
+			if (this.messageQueue.length >= MAX_QUEUE_SIZE) {
+				console.log("[WS] Queue full, dropping oldest message");
+				this.messageQueue.shift();
+			}
+
+			this.messageQueue.push(signalData);
+			console.log(`[WS] Queued signal for ${signalData.symbol}`);
+
+			await this.processMessageQueue();
 		});
 
 		// Error handling
@@ -341,7 +332,7 @@ class DirectionalTradingManager {
 	}
 
 	async initialize() {
-		try {
+
 			logger.info(
 				`[INIT] Initializing ${this.direction} trading manager for:`,
 				this.symbols
@@ -380,13 +371,6 @@ class DirectionalTradingManager {
 			logger.info(
 				`[INIT] ${this.direction} manager initialized with ${this.symbols.length} symbols`
 			);
-		} catch (error) {
-			logger.error(
-				`[INIT] Failed to initialize ${this.direction} trading manager:`,
-				error
-			);
-			throw error;
-		}
 	}
 
 	async processSignal(signalData) {
@@ -958,85 +942,79 @@ class SymbolTradingManager {
 }
 
 async function initializeExchange(markets) {
-	try {
-		const connection = new Connection(process.env.RPC_TRADINGBOT);
+	const connection = new Connection(process.env.RPC_TRADINGBOT);
 
-		// Create set of markets to load
-		const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
-		const marketsArray = Array.from(marketsToLoad);
+	// Create set of markets to load
+	const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
+	const marketsArray = Array.from(marketsToLoad);
 
-		const loadExchangeConfig = types.defaultLoadExchangeConfig(
-			Network.MAINNET,
-			connection,
-			{
-				skipPreflight: true,
-				preflightCommitment: "confirmed",
-				commitment: "confirmed",
-			},
-			25, // 50rps chainstack = 20ms delay, set to 25 for funzies
-			true,
-			connection,
-			marketsArray,
-			undefined,
-			marketsArray
-		);
+	const loadExchangeConfig = types.defaultLoadExchangeConfig(
+		Network.MAINNET,
+		connection,
+		{
+			skipPreflight: true,
+			preflightCommitment: "confirmed",
+			commitment: "confirmed",
+		},
+		25, // 50rps chainstack = 20ms delay, set to 25 for funzies
+		true,
+		connection,
+		marketsArray,
+		undefined,
+		marketsArray
+	);
 
-		await Exchange.load(loadExchangeConfig);
-		logger.info("Exchange loaded successfully");
+	await Exchange.load(loadExchangeConfig);
+	logger.info("Exchange loaded successfully");
 
-		updatePriorityFees();
+	updatePriorityFees();
 
-		return { connection };
-	} catch (error) {
-		logger.error("Error initializing exchange:", error);
-		throw error;
-	}
+	return { connection };
 }
-
 
 async function setupPriorityFees() {
-  return true;
+	return true;
 }
 
-
 async function updatePriorityFees() {
-  
-  const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`; 
+	const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
-  const response = await fetch(helius_url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getPriorityFeeEstimate",
-      params: [{
-        "accountKeys": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
-        "options": {
-            "includeAllPriorityFeeLevels": true,
-        }
-      }]
-    }),
-  });
+	const response = await fetch(helius_url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "getPriorityFeeEstimate",
+			params: [
+				{
+					accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+					options: {
+						includeAllPriorityFeeLevels: true,
+					},
+				},
+			],
+		}),
+	});
 
-  const data = await response.json();
+	const data = await response.json();
 
-  console.log("Fees: ", data.result.priorityFeeLevels);
+	console.log("Fees: ", data.result.priorityFeeLevels);
 
-  // Fees:  {
-  //  min: 0,
-  //  low: 0,
-  //  medium: 1,
-  //  high: 120000,
-  //  veryHigh: 10526633,
-  //  unsafeMax: 3988354006
-  //  }
+	// Fees:  {
+	//  min: 0,
+	//  low: 0,
+	//  medium: 1,
+	//  high: 120000,
+	//  veryHigh: 10526633,
+	//  unsafeMax: 3988354006
+	//  }
 
-  Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
+	Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
 
-  console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
+	console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
 }
 
 /**
@@ -1044,41 +1022,34 @@ async function updatePriorityFees() {
  * Initializes and runs the trading system
  */
 async function main() {
-	try {
-		const tradingSymbols = validateConfig();
-		logger.info("[INIT] Starting Multi-Symbol Trading System", {
-			symbols: tradingSymbols,
-		});
+	const tradingSymbols = validateConfig();
+	logger.info("[INIT] Starting Multi-Symbol Trading System", {
+		symbols: tradingSymbols,
+	});
 
-		// Initialize Exchange and priority fees first
-		const marketIndices = tradingSymbols.map(
-			(symbol) => constants.Asset[symbol]
-		);
-		const { connection } = await initializeExchange(marketIndices);
+	// Initialize Exchange and priority fees first
+	const marketIndices = tradingSymbols.map((symbol) => constants.Asset[symbol]);
+	const { connection } = await initializeExchange(marketIndices);
 
-		const multiManager = new MultiTradingManager();
-		await multiManager.initialize(tradingSymbols);
+	const multiManager = new MultiTradingManager();
+	await multiManager.initialize(tradingSymbols);
 
-		// Add cleanup of priority fee interval
-		process.on("SIGINT", () => {
-			logger.info("[SHUTDOWN] Graceful shutdown initiated");
-			// clearInterval(updateInterval);
+	// Add cleanup of priority fee interval
+	process.on("SIGINT", () => {
+		logger.info("[SHUTDOWN] Graceful shutdown initiated");
+		// clearInterval(updateInterval);
 
-			multiManager.shutdown();
-			process.exit(0);
-		});
+		multiManager.shutdown();
+		process.exit(0);
+	});
 
-		process.on("SIGTERM", () => {
-			logger.info("[SHUTDOWN] Graceful shutdown initiated");
-			// clearInterval(updateInterval);
+	process.on("SIGTERM", () => {
+		logger.info("[SHUTDOWN] Graceful shutdown initiated");
+		// clearInterval(updateInterval);
 
-			multiManager.shutdown();
-			process.exit(0);
-		});
-	} catch (error) {
-		logger.error("[MAIN] Fatal error:", error);
-		process.exit(1);
-	}
+		multiManager.shutdown();
+		process.exit(0);
+	});
 }
 
 process.on("unhandledRejection", (reason, promise) => {
