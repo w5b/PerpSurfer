@@ -456,27 +456,31 @@ export class ZetaClientWrapper {
 			`Opening ${direction} position for ${assets.assetToName(marketIndex)}`
 		);
 
+    await this.client.updateState(true, true);
+
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 		// Keep track of cancelled bits to avoid reuse
 		const cancelledBits = [];
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
+
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 
-			// this.updatePriorityFees();
 			const triggerOrderTxs = [];
 
 			for (const triggerOrder of openTriggerOrders) {
-				await this.client.updateState(true, true);
-				const tx = await this.client.cancelTriggerOrder(
+
+        const tx = await this.client.cancelTriggerOrder(
 					triggerOrder.triggerOrderBit
 				);
+
+        logger.info("Trigger Order Cancelled. Waiting 5s...", triggerOrderTxs);
+        utils.sleep(5000);
+  
 				cancelledBits.push(triggerOrder.triggerOrderBit);
 				triggerOrderTxs.push(tx);
 			}
 
-			logger.info("Trigger Orders Cancelled. Waiting 3s...", triggerOrderTxs);
-			utils.sleep(3000);
 		}
 
 		const settings = this.fetchSettings();
