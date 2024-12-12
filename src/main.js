@@ -332,45 +332,42 @@ class DirectionalTradingManager {
 	}
 
 	async initialize() {
+		logger.info(
+			`[INIT] Initializing ${this.direction} trading manager for:`,
+			this.symbols
+		);
 
-			logger.info(
-				`[INIT] Initializing ${this.direction} trading manager for:`,
-				this.symbols
+		// Initialize single ZetaWrapper for all markets in this direction
+		this.zetaWrapper = new ZetaClientWrapper();
+		const keypairPath =
+			this.direction === "long"
+				? process.env.KEYPAIR_FILE_PATH_LONG
+				: process.env.KEYPAIR_FILE_PATH_SHORT;
+
+		// Get all market indices at once
+		const marketIndices = this.symbols.map((symbol) => constants.Asset[symbol]);
+
+		// Initialize one client with all market indices
+		await this.zetaWrapper.initializeClient(keypairPath);
+		logger.info(
+			`[INIT] ZetaWrapper initialized for ${this.direction} trading with markets:`,
+			marketIndices.map((idx) => constants.Asset[idx])
+		);
+
+		// Create managers for each symbol sharing the same wrapper
+		for (const symbol of this.symbols) {
+			const marketIndex = constants.Asset[symbol];
+			const manager = new SymbolTradingManager(
+				marketIndex,
+				this.direction,
+				this.zetaWrapper
 			);
+			this.symbolManagers.set(symbol, manager);
+		}
 
-			// Initialize single ZetaWrapper for all markets in this direction
-			this.zetaWrapper = new ZetaClientWrapper();
-			const keypairPath =
-				this.direction === "long"
-					? process.env.KEYPAIR_FILE_PATH_LONG
-					: process.env.KEYPAIR_FILE_PATH_SHORT;
-
-			// Get all market indices at once
-			const marketIndices = this.symbols.map(
-				(symbol) => constants.Asset[symbol]
-			);
-
-			// Initialize one client with all market indices
-			await this.zetaWrapper.initializeClient(keypairPath);
-			logger.info(
-				`[INIT] ZetaWrapper initialized for ${this.direction} trading with markets:`,
-				marketIndices.map((idx) => constants.Asset[idx])
-			);
-
-			// Create managers for each symbol sharing the same wrapper
-			for (const symbol of this.symbols) {
-				const marketIndex = constants.Asset[symbol];
-				const manager = new SymbolTradingManager(
-					marketIndex,
-					this.direction,
-					this.zetaWrapper
-				);
-				this.symbolManagers.set(symbol, manager);
-			}
-
-			logger.info(
-				`[INIT] ${this.direction} manager initialized with ${this.symbols.length} symbols`
-			);
+		logger.info(
+			`[INIT] ${this.direction} manager initialized with ${this.symbols.length} symbols`
+		);
 	}
 
 	async processSignal(signalData) {
@@ -487,6 +484,10 @@ class SymbolTradingManager {
 		this.baseMonitoringInterval = 3000; // Store base interval
 		this.maxJitter = 1000; // Maximum jitter in milliseconds
 
+		// Initialize progress tracking values
+		this.hasReachedThreshold = false;
+		this.maxProgressReached = 0;
+
 		this.initialStopLossPrice = null; // Add this to track initial stop loss price
 	}
 
@@ -559,6 +560,7 @@ class SymbolTradingManager {
 				this.marketIndex
 			);
 
+			// For no position, only process entry signals
 			if (!currentPosition || currentPosition.size === 0) {
 				if (signalData.signal !== 0) {
 					await this.openNewPosition(signalData);
@@ -566,44 +568,25 @@ class SymbolTradingManager {
 				return;
 			}
 
+			// For existing positions, start monitoring if not already doing so
 			const positionId = this.generatePositionId(currentPosition);
-			const hasOriginalSL = await this.hasOriginalStopLoss(currentPosition);
-
-			if (!hasOriginalSL) {
-				console.log(
-					`[${this.symbol}] Stop loss already adjusted, skipping monitoring for ${positionId}`
-				);
-				return;
-			}
 
 			if (!this.monitoringIntervals.has(positionId)) {
-				console.log(`[${this.symbol}] Starting monitoring for ${positionId}`, {
-					size: currentPosition.size,
-					direction: this.direction,
-					interval: `${this.baseMonitoringInterval}ms + jitter(${this.maxJitter}ms)`,
-				});
-
-				// Create interval with jitter
 				const monitorWithJitter = () => {
 					const interval = this.getJitteredInterval();
 					setTimeout(async () => {
 						await this.monitorPosition(currentPosition);
 						if (this.monitoringIntervals.has(positionId)) {
-							// Check if still monitoring
-							monitorWithJitter(); // Schedule next check with new jitter
+							monitorWithJitter();
 						}
 					}, interval);
 				};
 
-				// Start the monitoring with jitter
-				this.monitoringIntervals.set(positionId, true); // Just use a boolean flag since we're using setTimeout
+				this.monitoringIntervals.set(positionId, true);
 				monitorWithJitter();
 			}
 		} catch (error) {
-			logger.error(
-				`[TRADE] Error processing signal for ${this.symbol}:`,
-				error
-			);
+			logger.error(`Error processing signal for ${this.symbol}:`, error);
 		}
 	}
 
@@ -653,31 +636,22 @@ class SymbolTradingManager {
 
 	async monitorPosition(originalPosition) {
 		const positionId = this.generatePositionId(originalPosition);
-
-		if (this.isAdjusting) {
-			return;
-		}
+		if (this.isProcessing) return;
 
 		try {
-			const settings = await this.zetaWrapper.fetchSettings();
-			const { trailingStopLoss } = settings;
-
-			// const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
-			// if (!currentPosition || currentPosition.size === 0) {
-			//   logger.info(`[${this.symbol}] Position closed, stopping monitoring`);
-			//   this.stopMonitoring(positionId);
-			//   return;
-			// }
-
+			this.isProcessing = true;
 			const currentPosition = await this.zetaWrapper.getPosition(
 				this.marketIndex
 			);
+
 			if (!currentPosition || currentPosition.size === 0) {
-				// Only log and stop monitoring if we haven't already
-				if (this.monitoringIntervals.has(positionId)) {
-					logger.info(`[${this.symbol}] Position closed, stopping monitoring`);
-					this.stopMonitoring(positionId);
-				}
+				logger.info(
+					`[${this.symbol}] Position closed or not found, stopping monitoring`,
+					{
+						positionId,
+					}
+				);
+				this.stopMonitoring(positionId);
 				return;
 			}
 
@@ -685,21 +659,18 @@ class SymbolTradingManager {
 				this.marketIndex
 			);
 			const isShort = currentPosition.size < 0;
-
-			const stopLoss = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-			);
 			const takeProfit = triggerOrders.find((order) =>
 				isShort
 					? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
 					: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
 			);
 
-			if (!stopLoss || !takeProfit) {
+			if (!takeProfit) {
 				logger.info(
-					`[${this.symbol}] No stop loss or take profit found, stopping monitoring`
+					`[${this.symbol}] Take profit order not found, stopping monitoring`,
+					{
+						positionId,
+					}
 				);
 				this.stopMonitoring(positionId);
 				return;
@@ -711,129 +682,121 @@ class SymbolTradingManager {
 			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(
 				this.marketIndex
 			);
-			const takeProfitPrice = takeProfit.orderPrice / 1e6;
-			const currentStopLossPrice = stopLoss.orderPrice / 1e6;
+			const takeProfitPrice = this.zetaWrapper.roundToTickSize(
+				takeProfit.orderPrice / 1e6
+			);
 
 			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
-			const currentProgress = isShort
+			const currentDistance = isShort
 				? entryPrice - currentPrice
 				: currentPrice - entryPrice;
-			const progressPercent = currentProgress / totalDistanceToTP;
+			const progressPercent = currentDistance / totalDistanceToTP;
 
-			// Cache the initial stop loss price for the position if not already set
-			if (!this.initialStopLossPrice) {
-				this.initialStopLossPrice = currentStopLossPrice;
-			}
-
-			// If stop loss has moved significantly from initial price, consider it adjusted
-			const stopLossHasChanged =
-				Math.abs(currentStopLossPrice - this.initialStopLossPrice) /
-					this.initialStopLossPrice >
-				0.001;
-
-			if (stopLossHasChanged) {
-				logger.info(
-					`[${this.symbol}] Stop loss already adjusted, stopping monitoring`,
-					{
-						initialStopLoss: this.initialStopLossPrice.toFixed(4),
-						currentStopLoss: currentStopLossPrice.toFixed(4),
-					}
-				);
-				this.stopMonitoring(positionId);
-				return;
-			}
-
+			// Log position status if price has changed
 			if (this.lastCheckedPrice !== currentPrice) {
-				console.log(`[${this.symbol}] Position progress update:`, {
-					positionId,
+				console.log(`[${this.symbol}] Position progress update`, {
 					direction: isShort ? "SHORT" : "LONG",
-					entryPrice: entryPrice.toFixed(4),
-					currentPrice: currentPrice.toFixed(4),
-					stopLossPrice: currentStopLossPrice.toFixed(4),
-					takeProfitPrice: takeProfitPrice.toFixed(4),
+					entry: entryPrice.toFixed(4),
+					current: currentPrice.toFixed(4),
+					takeProfit: takeProfitPrice.toFixed(4),
 					progress: (progressPercent * 100).toFixed(2) + "%",
-					thresholdNeeded:
-						(trailingStopLoss.progressThreshold * 100).toFixed(2) + "%",
+					thresholdReached: this.hasReachedThreshold,
+					maxProgress:
+						this.maxProgressReached > 0
+							? (this.maxProgressReached * 100).toFixed(2) + "%"
+							: (progressPercent * 100).toFixed(2) + "%",
 				});
 				this.lastCheckedPrice = currentPrice;
 			}
 
-			if (progressPercent >= trailingStopLoss.progressThreshold) {
-				this.isAdjusting = true;
-
-				const newStopLoss = this.zetaWrapper.roundToTickSize(
-					isShort
-						? entryPrice - totalDistanceToTP * trailingStopLoss.stopLossDistance
-						: entryPrice + totalDistanceToTP * trailingStopLoss.stopLossDistance
-				);
-
-				const newTrigger = this.zetaWrapper.roundToTickSize(
-					isShort
-						? entryPrice - totalDistanceToTP * trailingStopLoss.triggerDistance
-						: entryPrice + totalDistanceToTP * trailingStopLoss.triggerDistance
-				);
-
-				logger.info(`[${this.symbol}] Adjusting stop loss:`, {
-					currentPrice: currentPrice.toFixed(4),
-					newStopLoss: newStopLoss.toFixed(4),
-					newTrigger: newTrigger.toFixed(4),
-					progress: (progressPercent * 100).toFixed(2) + "%",
-				});
-
-				const newPrices = {
-					orderPrice: utils.convertDecimalToNativeInteger(newStopLoss),
-					triggerPrice: utils.convertDecimalToNativeInteger(newTrigger),
-				};
-
-				try {
-					const adjustmentSuccess = await this.zetaWrapper.adjustStopLossOrder(
-						newPrices,
-						this.marketIndex,
-						currentPosition.size
-					);
-
-					if (adjustmentSuccess) {
-						await new Promise((resolve) => setTimeout(resolve, 2000));
-						await this.zetaWrapper.client.updateState();
-
-						const verificationTriggerOrders =
-							await this.zetaWrapper.getTriggerOrders(this.marketIndex);
-						const verifiedStopLoss = verificationTriggerOrders.find(
-							(order) => order.triggerDirection === stopLoss.triggerDirection
-						);
-
-						if (
-							verifiedStopLoss &&
-							verifiedStopLoss.orderPrice !== stopLoss.orderPrice
-						) {
-							logger.info(`[${this.symbol}] Stop loss adjustment verified`, {
-								oldPrice: (stopLoss.orderPrice / 1e6).toFixed(4),
-								newPrice: (verifiedStopLoss.orderPrice / 1e6).toFixed(4),
-							});
-							this.stopMonitoring(positionId);
-							return;
-						} else {
-							logger.error(
-								`[${this.symbol}] Stop loss adjustment verification failed`
-							);
-						}
+			if (!this.hasReachedThreshold && progressPercent >= 0.6) {
+				logger.info(
+					`[${this.symbol}] Reached 60% threshold, monitoring for retracement`,
+					{
+						progress: (progressPercent * 100).toFixed(2) + "%",
+						current: currentPrice.toFixed(4),
+						takeProfit: takeProfitPrice.toFixed(4),
 					}
-				} catch (error) {
-					logger.error(
-						`[${this.symbol}] Error during stop loss adjustment:`,
-						error
+				);
+				this.hasReachedThreshold = true;
+				this.maxProgressReached = progressPercent;
+			}
+
+			if (this.hasReachedThreshold) {
+				if (progressPercent > this.maxProgressReached) {
+					this.maxProgressReached = progressPercent;
+					logger.info(`[${this.symbol}] New maximum progress reached`, {
+						progress: (progressPercent * 100).toFixed(2) + "%",
+						price: currentPrice.toFixed(4),
+					});
+				}
+
+				if (progressPercent >= 1.0) {
+					logger.info(
+						`[${this.symbol}] Take profit target reached, closing position`,
+						{
+							progress: (progressPercent * 100).toFixed(2) + "%",
+							price: currentPrice.toFixed(4),
+						}
 					);
-				} finally {
-					this.isAdjusting = false;
+					await this.closeAndVerifyPosition();
+					return;
+				}
+
+				if (progressPercent <= 0.4) {
+					logger.info(
+						`[${this.symbol}] Price retraced below 40%, closing position`,
+						{
+							progress: (progressPercent * 100).toFixed(2) + "%",
+							price: currentPrice.toFixed(4),
+							maxReached: (this.maxProgressReached * 100).toFixed(2) + "%",
+						}
+					);
+					await this.closeAndVerifyPosition();
+					return;
 				}
 			}
+		} finally {
+			this.isProcessing = false;
+		}
+	}
+
+	async closeAndVerifyPosition() {
+		try {
+			logger.info(`[${this.symbol}] Attempting to close position`);
+			const txid = await this.zetaWrapper.closePosition(this.marketIndex);
+			if (!txid) {
+				logger.error(
+					`[${this.symbol}] Failed to get transaction ID for position closure`
+				);
+				return false;
+			}
+
+			logger.info(`[${this.symbol}] Close position transaction sent`, { txid });
+			await new Promise((resolve) => setTimeout(resolve, 5000));
+
+			for (let i = 0; i < 5; i++) {
+				await this.zetaWrapper.client.updateState();
+				const position = await this.zetaWrapper.getPosition(this.marketIndex);
+
+				if (!position || position.size === 0) {
+					logger.info(`[${this.symbol}] Position closure verified`);
+					this.stopMonitoring(this.generatePositionId(position));
+					return true;
+				}
+				logger.info(
+					`[${this.symbol}] Position still open, verification attempt ${
+						i + 1
+					}/5`
+				);
+				await new Promise((resolve) => setTimeout(resolve, 2000));
+			}
+
+			logger.error(`[${this.symbol}] Failed to verify position closure`);
+			return false;
 		} catch (error) {
-			logger.error(`[${this.symbol}] Error in position monitoring:`, {
-				error: error.message,
-				stack: error.stack,
-				positionId,
-			});
-			this.isAdjusting = false;
+			logger.error(`[${this.symbol}] Error during position closure:`, error);
+			return false;
 		}
 	}
 
@@ -843,87 +806,6 @@ class SymbolTradingManager {
 			this.monitoringIntervals.delete(positionId);
 			console.log(`[${this.symbol}] Stopped monitoring ${positionId}`);
 		}
-	}
-
-	async shouldAdjustStopLoss(position) {
-		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(
-			this.marketIndex
-		);
-		const entryPrice = Math.abs(position.costOfTrades / position.size);
-		const isShort = position.size < 0;
-
-		const triggerOrders = await this.zetaWrapper.getTriggerOrders(
-			this.marketIndex
-		);
-		const takeProfit = triggerOrders.find((order) =>
-			isShort
-				? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-				: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-		);
-
-		if (!takeProfit) return false;
-
-		const tpPrice = takeProfit.orderPrice / 1e6;
-		const totalDistance = Math.abs(tpPrice - entryPrice);
-		const currentProgress = isShort
-			? entryPrice - currentPrice
-			: currentPrice - entryPrice;
-
-		const progressPercent = currentProgress / totalDistance;
-
-		const requiredProgress = 0.6; // 60% progress towards TP
-
-		// Always log the progress check
-		console.log(`[${this.symbol}] Progress check:`, {
-			direction: isShort ? "SHORT" : "LONG",
-			entryPrice: entryPrice.toFixed(4),
-			currentPrice: currentPrice.toFixed(4),
-			tpPrice: tpPrice.toFixed(4),
-			progress: (progressPercent * 100).toFixed(2) + "%",
-			requiredProgress: (requiredProgress * 100).toFixed(2) + "%",
-			readyToAdjust: progressPercent >= requiredProgress,
-		});
-
-		return progressPercent >= requiredProgress;
-	}
-
-	async hasOriginalStopLoss(position) {
-		const triggerOrders = await this.zetaWrapper.getTriggerOrders(
-			this.marketIndex
-		);
-		const isShort = position.size < 0;
-
-		const stopLoss = triggerOrders.find((order) =>
-			isShort
-				? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-				: order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-		);
-
-		if (!stopLoss) return false;
-
-		const currentStopLossPrice = stopLoss.orderPrice / 1e6;
-		const entryPrice = Math.abs(position.costOfTrades / position.size);
-
-		const { stopLossPrice: originalStopLoss } =
-			this.zetaWrapper.calculateTPSLPrices(
-				isShort ? "short" : "long",
-				entryPrice,
-				await this.zetaWrapper.fetchSettings()
-			);
-
-		const difference =
-			Math.abs(currentStopLossPrice - originalStopLoss) / originalStopLoss;
-
-		console.log(`[${this.symbol}] Stop Loss Analysis:`, {
-			direction: isShort ? "SHORT" : "LONG",
-			entryPrice: entryPrice.toFixed(4),
-			originalStopLoss: originalStopLoss.toFixed(4),
-			currentStopLoss: currentStopLossPrice.toFixed(4),
-			difference: (difference * 100).toFixed(2) + "%",
-			isOriginal: difference < 0.005,
-		});
-
-		return difference < 0.005;
 	}
 
 	generatePositionId(position) {
@@ -953,8 +835,8 @@ async function initializeExchange(markets) {
 		connection,
 		{
 			skipPreflight: true,
-			preflightCommitment: "confirmed",
-			commitment: "confirmed",
+			preflightCommitment: "finalized",
+			commitment: "finalized",
 		},
 		25, // 50rps chainstack = 20ms delay, set to 25 for funzies
 		true,
