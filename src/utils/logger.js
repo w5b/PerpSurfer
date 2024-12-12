@@ -9,8 +9,9 @@ let bot = null;
 const isTelegramConfigured = Boolean(TELEGRAM_BOT_TOKEN && ADMIN_CHAT_ID);
 
 if (isTelegramConfigured) {
-	bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
 }
+
 
 const logFormat = printf(
 	({ level, message, timestamp, stack, ...metadata }) => {
@@ -82,25 +83,42 @@ function escapeHtml(unsafe) {
 }
 
 function splitLongMessage(message, maxLength = 4000) {
-	const parts = [];
-	while (message.length > 0) {
-		if (message.length <= maxLength) {
-			parts.push(message);
-			break;
-		}
-
-		let part = message.substr(0, maxLength);
-		let lastNewline = part.lastIndexOf("\n");
-
-		if (lastNewline > maxLength * 0.8) {
-			part = part.substr(0, lastNewline);
-		}
-
-		parts.push(part);
-		message = message.substr(part.length);
-	}
-	return parts;
+  // First, we'll create the complete HTML message
+  const parts = [];
+  let currentPart = '';
+  const words = message.split(/(\s+)/);
+  
+  for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      const potentialPart = currentPart + word;
+      
+      // Check if adding this word would exceed maxLength
+      if (potentialPart.length > maxLength) {
+          // If current part is empty, we need to split the word itself
+          if (!currentPart) {
+              // Handle the case where a single word is too long
+              const firstChunk = word.substring(0, maxLength);
+              parts.push(firstChunk);
+              currentPart = word.substring(maxLength);
+          } else {
+              // Push current part and start new one
+              parts.push(currentPart);
+              currentPart = word;
+          }
+      } else {
+          currentPart = potentialPart;
+      }
+  }
+  
+  // Don't forget the last part
+  if (currentPart) {
+      parts.push(currentPart);
+  }
+  
+  // Now wrap each part in proper HTML tags
+  return parts.map(part => `<pre>${escapeHtml(part)}</pre>`);
 }
+
 
 // Debounce time in milliseconds (1000 ms) TG max 1 per second
 const DEBOUNCE_TIME = 1000;
@@ -112,31 +130,35 @@ const accumulatedMessages = {};
 const timeouts = {};
 
 async function sendAccumulatedMessages(level) {
-	if (
-		!isTelegramConfigured ||
-		!accumulatedMessages[level] ||
-		accumulatedMessages[level].length === 0
-	) {
-		return;
-	}
+  if (
+      !isTelegramConfigured ||
+      !accumulatedMessages[level] ||
+      accumulatedMessages[level].length === 0
+  ) {
+      return;
+  }
 
-	const emoji = getEmojiForLogLevel(level);
-	const messages = accumulatedMessages[level].join("\n");
-	const escapedMessages = escapeHtml(messages);
-	const messageParts = splitLongMessage(
-		`${emoji} ${level.toUpperCase()}:\n<pre>${escapedMessages}</pre>`
-	);
+  const emoji = getEmojiForLogLevel(level);
+  const messages = accumulatedMessages[level].join("\n");
+  const messageParts = splitLongMessage(
+      `${emoji} ${level.toUpperCase()}:\n${messages}`
+  );
 
-	for (const part of messageParts) {
-		try {
-			await bot.sendMessage(ADMIN_CHAT_ID, part, { parse_mode: "HTML" });
-		} catch (error) {
-			console.error("Error sending message to admin:", error);
-		}
-	}
+  for (const part of messageParts) {
+      try {
+          await bot.sendMessage(ADMIN_CHAT_ID, part, { parse_mode: "HTML" });
+          // Add delay between messages to respect rate limits
+          await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+          console.error("Error sending message to admin:", error);
+          // Log the problematic message part for debugging
+          console.error("Problematic message part:", part);
+      }
+  }
 
-	accumulatedMessages[level] = [];
+  accumulatedMessages[level] = [];
 }
+
 
 function formatMetadata(metadata) {
 	if (Object.keys(metadata).length > 0) {

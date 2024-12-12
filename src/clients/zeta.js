@@ -28,6 +28,7 @@ import {
 	PriorityFeeSubscriber,
 	fetchSolanaPriorityFee,
 } from "@drift-labs/sdk";
+import readline from "readline";
 
 dotenv.config();
 
@@ -70,9 +71,14 @@ export class ZetaClientWrapper {
 		};
 	}
 
-	roundToTickSize(price) {
+	roundToTickSize(nativePrice) {
+		// Convert from native integer to decimal first
+		const decimalPrice = nativePrice / 1e6;
+		// Round to the nearest tick (0.0001)
 		const tickSize = 0.0001;
-		return Math.round(price / tickSize) * tickSize;
+		const roundedDecimal = Math.round(decimalPrice / tickSize) * tickSize;
+		// Convert back to native integer
+		return Math.round(roundedDecimal * 1e6);
 	}
 
 	async initializeClient(keypairPath = null) {
@@ -570,7 +576,8 @@ export class ZetaClientWrapper {
 					triggerOrderTxs.push(tx);
 				}
 
-				logger.info("Trigger Orders Cancelled.", triggerOrderTxs);
+				logger.info("Trigger Orders Cancelled. Waiting 3s...", triggerOrderTxs);
+        utils.sleep(3000);
 			}
 
 			const settings = this.fetchSettings();
@@ -664,6 +671,7 @@ Opening ${direction} position:
 			transaction.add(tpOrderIx);
 			transaction.add(slOrderIx);
 
+
 			const txid = await utils.processTransaction(
 				this.client.provider,
 				transaction,
@@ -699,15 +707,8 @@ Opening ${direction} position:
 		return this.settings;
 	}
 
+	// Update calculateTPSLPrices to handle decimal prices correctly
 	calculateTPSLPrices(direction, price, settings) {
-		// Log inputs in both native and human-readable format for debugging
-		console.log("TP/SL Calculation Starting:", {
-			direction,
-			priceNative: price,
-			priceDecimal: (price / 1e6).toFixed(4),
-			settings,
-		});
-
 		if (!direction || !price || !settings) {
 			throw new Error("Invalid inputs for TP/SL calculation");
 		}
@@ -715,22 +716,39 @@ Opening ${direction} position:
 		const { takeProfitPercentage, stopLossPercentage } = settings;
 		const isLong = direction === "long";
 
-		// Keep all calculations in native format, just like the original
+		// Calculate take profit levels
 		const takeProfitPrice = isLong
-			? price + price * takeProfitPercentage
-			: price - price * takeProfitPercentage;
+			? price * (1 + takeProfitPercentage) // Long: Entry + TP%
+			: price * (1 - takeProfitPercentage); // Short: Entry - TP%
 
 		const takeProfitTrigger = isLong
-			? price + (takeProfitPrice - price) * 0.9
-			: price - (price - takeProfitPrice) * 0.9;
+			? price + (takeProfitPrice - price) * 0.95 // Long: Entry + 95% of distance to TP
+			: price - (price - takeProfitPrice) * 0.95; // Short: Entry - 95% of distance to TP
 
+		// Calculate stop loss levels
 		const stopLossPrice = isLong
-			? price - price * stopLossPercentage
-			: price + price * stopLossPercentage;
+			? price * (1 - stopLossPercentage) // Long: Entry - SL%
+			: price * (1 + stopLossPercentage); // Short: Entry + SL%
 
 		const stopLossTrigger = isLong
-			? price - (price - stopLossPrice) * 0.9
-			: price + (stopLossPrice - price) * 0.9;
+			? price - (price - stopLossPrice) * 0.95 // Long: Entry - 95% of distance to SL
+			: price + (stopLossPrice - price) * 0.95; // Short: Entry + 95% of distance to SL
+
+		// Log calculations for verification
+		logger.info("TP/SL Price Calculations:", {
+			direction,
+			entryPrice: price,
+			takeProfit: {
+				price: takeProfitPrice,
+				trigger: takeProfitTrigger,
+				percentage: takeProfitPercentage * 100,
+			},
+			stopLoss: {
+				price: stopLossPrice,
+				trigger: stopLossTrigger,
+				percentage: stopLossPercentage * 100,
+			},
+		});
 
 		return {
 			takeProfitPrice,
@@ -856,35 +874,24 @@ Opening ${direction} position:
 		side,
 		makerOrTaker = "maker"
 	) {
-		// First round the decimal price to valid tick size
-		const decimalPrice = this.roundToTickSize(adjustedPrice / 1e6);
+		// adjustedPrice comes in as a decimal value (e.g., 232.30)
+		// We convert it directly to native format without additional division
+		const nativePrice = utils.convertDecimalToNativeInteger(adjustedPrice);
 
 		logger.info("Creating main order instruction:", {
 			market: assets.assetToName(marketIndex),
 			priceInfo: {
-				rawPrice: adjustedPrice,
-				decimal: decimalPrice,
-				native: utils.convertDecimalToNativeInteger(decimalPrice).toString(),
+				originalPrice: adjustedPrice,
+				nativePrice: nativePrice.toString(),
 			},
 			sizeInfo: {
 				nativeLotSize: nativeLotSize.toString(),
-				// Use the market's actual lot size precision
-				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
 			},
 			orderDetails: {
 				side: side === types.Side.BID ? "BID" : "ASK",
 				type: makerOrTaker === "maker" ? "POST_ONLY_SLIDE" : "LIMIT",
 				expiryOffset: 180,
 			},
-		});
-
-		const nativePrice = utils.convertDecimalToNativeInteger(decimalPrice);
-
-		logger.info("Final instruction parameters:", {
-			marketIndex,
-			price: nativePrice.toString(),
-			size: nativeLotSize.toString(),
-			orderType: makerOrTaker === "maker" ? "POSTONLYSLIDE" : "LIMIT",
 		});
 
 		return this.client.createPlacePerpOrderInstruction(
@@ -912,51 +919,36 @@ Opening ${direction} position:
 		nativeLotSize,
 		triggerOrderBit = 0
 	) {
+		// These prices come in as decimal values, ready for native conversion
 		const tp_side = direction === "long" ? types.Side.ASK : types.Side.BID;
 		const triggerDirection =
 			direction === "long"
 				? types.TriggerDirection.GREATERTHANOREQUAL
 				: types.TriggerDirection.LESSTHANOREQUAL;
 
-		// Round both prices to valid tick sizes
-		const decimalTP = this.roundToTickSize(takeProfitPrice / 1e6);
-		const decimalTrigger = this.roundToTickSize(takeProfitTrigger / 1e6);
+		const nativeTakeProfit =
+			utils.convertDecimalToNativeInteger(takeProfitPrice);
+		const nativeTrigger =
+			utils.convertDecimalToNativeInteger(takeProfitTrigger);
 
 		logger.info("Creating take profit order instruction:", {
 			market: assets.assetToName(marketIndex),
 			direction,
 			priceInfo: {
-				rawTP: takeProfitPrice,
-				decimalTP,
-				nativeTP: utils.convertDecimalToNativeInteger(decimalTP).toString(),
-				rawTrigger: takeProfitTrigger,
-				decimalTrigger,
-				nativeTrigger: utils
-					.convertDecimalToNativeInteger(decimalTrigger)
-					.toString(),
+				takeProfitPrice,
+				takeProfitTrigger,
+				nativeTakeProfit: nativeTakeProfit.toString(),
+				nativeTrigger: nativeTrigger.toString(),
 			},
 			sizeInfo: {
 				nativeLotSize: nativeLotSize.toString(),
-				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
 			},
 			orderDetails: {
 				side: tp_side === types.Side.BID ? "BID" : "ASK",
 				triggerDirection:
 					direction === "long" ? "GREATER_THAN_OR_EQUAL" : "LESS_THAN_OR_EQUAL",
 				triggerOrderBit,
-				type: "FILL_OR_KILL",
 			},
-		});
-
-		const nativeTakeProfit = utils.convertDecimalToNativeInteger(decimalTP);
-		const nativeTrigger = utils.convertDecimalToNativeInteger(decimalTrigger);
-
-		logger.info("Final TP instruction parameters:", {
-			marketIndex,
-			orderPrice: nativeTakeProfit.toString(),
-			triggerPrice: nativeTrigger.toString(),
-			size: nativeLotSize.toString(),
-			bit: triggerOrderBit,
 		});
 
 		return this.client.createPlaceTriggerOrderIx(
@@ -984,51 +976,34 @@ Opening ${direction} position:
 		nativeLotSize,
 		triggerOrderBit = 1
 	) {
+		// These prices come in as decimal values, ready for native conversion
 		const sl_side = direction === "long" ? types.Side.ASK : types.Side.BID;
 		const triggerDirection =
 			direction === "long"
 				? types.TriggerDirection.LESSTHANOREQUAL
 				: types.TriggerDirection.GREATERTHANOREQUAL;
 
-		// Round both prices to valid tick sizes
-		const decimalSL = this.roundToTickSize(stopLossPrice / 1e6);
-		const decimalTrigger = this.roundToTickSize(stopLossTrigger / 1e6);
+		const nativeStopLoss = utils.convertDecimalToNativeInteger(stopLossPrice);
+		const nativeTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
 
 		logger.info("Creating stop loss order instruction:", {
 			market: assets.assetToName(marketIndex),
 			direction,
 			priceInfo: {
-				rawSL: stopLossPrice,
-				decimalSL,
-				nativeSL: utils.convertDecimalToNativeInteger(decimalSL).toString(),
-				rawTrigger: stopLossTrigger,
-				decimalTrigger,
-				nativeTrigger: utils
-					.convertDecimalToNativeInteger(decimalTrigger)
-					.toString(),
+				stopLossPrice,
+				stopLossTrigger,
+				nativeStopLoss: nativeStopLoss.toString(),
+				nativeTrigger: nativeTrigger.toString(),
 			},
 			sizeInfo: {
 				nativeLotSize: nativeLotSize.toString(),
-				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
 			},
 			orderDetails: {
 				side: sl_side === types.Side.BID ? "BID" : "ASK",
 				triggerDirection:
 					direction === "long" ? "LESS_THAN_OR_EQUAL" : "GREATER_THAN_OR_EQUAL",
 				triggerOrderBit,
-				type: "FILL_OR_KILL",
 			},
-		});
-
-		const nativeStopLoss = utils.convertDecimalToNativeInteger(decimalSL);
-		const nativeTrigger = utils.convertDecimalToNativeInteger(decimalTrigger);
-
-		logger.info("Final SL instruction parameters:", {
-			marketIndex,
-			orderPrice: nativeStopLoss.toString(),
-			triggerPrice: nativeTrigger.toString(),
-			size: nativeLotSize.toString(),
-			bit: triggerOrderBit,
 		});
 
 		return this.client.createPlaceTriggerOrderIx(
