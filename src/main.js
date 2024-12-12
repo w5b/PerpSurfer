@@ -936,10 +936,10 @@ class SymbolTradingManager {
 			originalStopLoss: originalStopLoss.toFixed(4),
 			currentStopLoss: currentStopLossPrice.toFixed(4),
 			difference: (difference * 100).toFixed(2) + "%",
-			isOriginal: difference < 0.001,
+			isOriginal: difference < 0.005,
 		});
 
-		return difference < 0.001;
+		return difference < 0.005;
 	}
 
 	generatePositionId(position) {

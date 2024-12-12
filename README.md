@@ -199,8 +199,8 @@ constructor() {
   // Risk management settings
   this.settings = {
     leverageMultiplier: 4,
-    takeProfitPercentage: 0.018,
-    stopLossPercentage: 0.025,
+    takeProfitPercentage: 0.036,
+    stopLossPercentage: 0.018,
     trailingStopLoss: {
       progressThreshold: 0.6,
       stopLossDistance: 0.4,
