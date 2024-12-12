@@ -634,132 +634,80 @@ class SymbolTradingManager {
 		}
 	}
 
-	async monitorPosition(originalPosition) {
-		const positionId = this.generatePositionId(originalPosition);
-		if (this.isProcessing) return;
-
-		try {
-			this.isProcessing = true;
-			const currentPosition = await this.zetaWrapper.getPosition(
-				this.marketIndex
-			);
-
-			if (!currentPosition || currentPosition.size === 0) {
-				logger.info(
-					`[${this.symbol}] Position closed or not found, stopping monitoring`,
-					{
-						positionId,
-					}
-				);
-				this.stopMonitoring(positionId);
-				return;
-			}
-
-			const triggerOrders = await this.zetaWrapper.getTriggerOrders(
-				this.marketIndex
-			);
-			const isShort = currentPosition.size < 0;
-			const takeProfit = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-			);
-
-			if (!takeProfit) {
-				logger.info(
-					`[${this.symbol}] Take profit order not found, stopping monitoring`,
-					{
-						positionId,
-					}
-				);
-				this.stopMonitoring(positionId);
-				return;
-			}
-
-			const entryPrice = Math.abs(
-				currentPosition.costOfTrades / currentPosition.size
-			);
-			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(
-				this.marketIndex
-			);
-			const takeProfitPrice = this.zetaWrapper.roundToTickSize(
-				takeProfit.orderPrice / 1e6
-			);
-
-			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
-			const currentDistance = isShort
-				? entryPrice - currentPrice
-				: currentPrice - entryPrice;
-			const progressPercent = currentDistance / totalDistanceToTP;
-
-			// Log position status if price has changed
-			if (this.lastCheckedPrice !== currentPrice) {
-				console.log(`[${this.symbol}] Position progress update`, {
-					direction: isShort ? "SHORT" : "LONG",
-					entry: entryPrice.toFixed(4),
-					current: currentPrice.toFixed(4),
-					takeProfit: takeProfitPrice.toFixed(4),
-					progress: (progressPercent * 100).toFixed(2) + "%",
-					thresholdReached: this.hasReachedThreshold,
-					maxProgress:
-						this.maxProgressReached > 0
-							? (this.maxProgressReached * 100).toFixed(2) + "%"
-							: (progressPercent * 100).toFixed(2) + "%",
-				});
-				this.lastCheckedPrice = currentPrice;
-			}
-
-			if (!this.hasReachedThreshold && progressPercent >= 0.6) {
-				logger.info(
-					`[${this.symbol}] Reached 60% threshold, monitoring for retracement`,
-					{
-						progress: (progressPercent * 100).toFixed(2) + "%",
-						current: currentPrice.toFixed(4),
-						takeProfit: takeProfitPrice.toFixed(4),
-					}
-				);
-				this.hasReachedThreshold = true;
-				this.maxProgressReached = progressPercent;
-			}
-
-			if (this.hasReachedThreshold) {
-				if (progressPercent > this.maxProgressReached) {
-					this.maxProgressReached = progressPercent;
-					logger.info(`[${this.symbol}] New maximum progress reached`, {
-						progress: (progressPercent * 100).toFixed(2) + "%",
-						price: currentPrice.toFixed(4),
-					});
-				}
-
-				if (progressPercent >= 1.0) {
-					logger.info(
-						`[${this.symbol}] Take profit target reached, closing position`,
-						{
-							progress: (progressPercent * 100).toFixed(2) + "%",
-							price: currentPrice.toFixed(4),
-						}
-					);
-					await this.closeAndVerifyPosition();
-					return;
-				}
-
-				if (progressPercent <= 0.4) {
-					logger.info(
-						`[${this.symbol}] Price retraced below 40%, closing position`,
-						{
-							progress: (progressPercent * 100).toFixed(2) + "%",
-							price: currentPrice.toFixed(4),
-							maxReached: (this.maxProgressReached * 100).toFixed(2) + "%",
-						}
-					);
-					await this.closeAndVerifyPosition();
-					return;
-				}
-			}
-		} finally {
-			this.isProcessing = false;
-		}
-	}
+  async monitorPosition(originalPosition) {
+    const positionId = this.generatePositionId(originalPosition);
+    if (this.isProcessing) return;
+  
+    try {
+      this.isProcessing = true;
+      const currentPosition = await this.zetaWrapper.getPosition(this.marketIndex);
+      
+      if (!currentPosition || currentPosition.size === 0) {
+        logger.info(`[${this.symbol}] Position closed or not found, stopping monitoring`);
+        this.stopMonitoring(positionId);
+        return;
+      }
+  
+      const triggerOrders = await this.zetaWrapper.getTriggerOrders(this.marketIndex);
+      const isShort = currentPosition.size < 0;
+      const takeProfit = triggerOrders.find(order => 
+        isShort
+          ? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
+          : order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
+      );
+  
+      if (!takeProfit) {
+        logger.info(`[${this.symbol}] Take profit order not found, stopping monitoring`);
+        this.stopMonitoring(positionId);
+        return;
+      }
+  
+      const entryPrice = Math.abs(currentPosition.costOfTrades / currentPosition.size);
+      const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(this.marketIndex);
+      const takeProfitPrice = this.zetaWrapper.roundToTickSize(takeProfit.orderPrice / 1e6);
+  
+      const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+      const currentDistance = isShort ? entryPrice - currentPrice : currentPrice - entryPrice;
+      const progressPercent = currentDistance / totalDistanceToTP;
+  
+      // Log only when price changes
+      if (this.lastCheckedPrice !== currentPrice) {
+        console.log(`[${this.symbol}] Position progress update`, {
+          direction: isShort ? "SHORT" : "LONG",
+          entry: entryPrice.toFixed(4),
+          current: currentPrice.toFixed(4),
+          takeProfit: takeProfitPrice.toFixed(4),
+          progress: (progressPercent * 100).toFixed(2) + "%",
+          thresholdReached: this.hasReachedThreshold
+        });
+        this.lastCheckedPrice = currentPrice;
+      }
+  
+      // Only track crossing the 60% threshold
+      if (!this.hasReachedThreshold && progressPercent >= 0.6) {
+        logger.info(`[${this.symbol}] Reached 60% threshold, monitoring for close conditions`);
+        this.hasReachedThreshold = true;
+      }
+  
+      // After threshold, check for closing conditions
+      if (this.hasReachedThreshold) {
+        if (progressPercent >= 1.0) {
+          logger.info(`[${this.symbol}] Take profit target reached, closing position`);
+          await this.closeAndVerifyPosition();
+          return;
+        }
+  
+        if (progressPercent <= 0.4) {
+          logger.info(`[${this.symbol}] Price retraced below 40%, closing position`);
+          await this.closeAndVerifyPosition();
+          return;
+        }
+      }
+  
+    } finally {
+      this.isProcessing = false;
+    }
+  }
 
 	async closeAndVerifyPosition() {
 		try {
