@@ -984,7 +984,6 @@ async function initializeExchange(markets) {
 		await Exchange.load(loadExchangeConfig);
 		logger.info("Exchange loaded successfully");
 
-		setupPriorityFees();
 		updatePriorityFees();
 
 		return { connection };
@@ -995,111 +994,50 @@ async function initializeExchange(markets) {
 }
 
 
-
-
-const priorityFeesConnection = new Connection(process.env.RPC_TRADINGBOT);
-
-let priorityFees;
-let currentPriorityFee;
-let priorityFeeMultiplier = 5;
-
 async function setupPriorityFees() {
-	try {
-		const config = {
-			priorityFeeMethod: PriorityFeeMethod.DRIFT,
-			frequencyMs: 5000,
-			connection: priorityFeesConnection,
-		};
-
-		logger.info("Initializing Solana Priority Fees with config:", {
-			method: config.priorityFeeMethod,
-			frequency: config.frequencyMs,
-			hasConnection: !!priorityFeesConnection,
-		});
-
-		priorityFees = new PriorityFeeSubscriber({
-			...config,
-			lookbackDistance: 150,
-			addresses: [],
-			connection: priorityFeesConnection,
-		});
-
-		logger.info("Subscribing to priority fees...");
-		await priorityFees.subscribe();
-
-		logger.info("Loading priority fee data...");
-		await priorityFees.load();
-
-		const recentFees = await fetchSolanaPriorityFee(
-			priorityFeesConnection,
-			150,
-			[]
-		);
-
-		logger.info("Recent Priority Fees:", {
-			numFees: recentFees?.length,
-			latestFee: recentFees?.[0]?.prioritizationFee,
-			oldestFee: recentFees?.[recentFees.length - 1]?.prioritizationFee,
-			latestSlot: recentFees?.[0]?.slot,
-			oldestSlot: recentFees?.[recentFees.length - 1]?.slot,
-		});
-
-		const initialFee =
-			recentFees
-				?.slice(0, 10)
-				.reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-
-		currentPriorityFee = Math.floor(initialFee * priorityFeeMultiplier);
-
-		logger.info("Priority Fees Setup Complete", {
-			subscriber: !!priorityFees,
-			initialFee,
-			adjustedFee: currentPriorityFee,
-			multiplier: priorityFeeMultiplier,
-		});
-	} catch (error) {
-		logger.error("Error setting up priority fees:", error);
-		throw error;
-	}
+  return true;
 }
+
 
 async function updatePriorityFees() {
-	try {
-		if (!priorityFees) {
-			throw new Error("Priority Fees not initialized");
-		}
+  
+  const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`; 
 
-		await priorityFees.load();
+  const response = await fetch(helius_url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getPriorityFeeEstimate",
+      params: [{
+        "accountKeys": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "options": {
+            "includeAllPriorityFeeLevels": true,
+        }
+      }]
+    }),
+  });
 
-		const recentFees = await fetchSolanaPriorityFee(
-			priorityFeesConnection,
-			150,
-			[]
-		);
+  const data = await response.json();
 
-		const newFee =
-			recentFees
-				?.slice(0, 10)
-				.reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 ||
-			currentPriorityFee;
+  console.log("Fees: ", data.result.priorityFeeLevels);
 
-		currentPriorityFee = Math.floor(newFee * priorityFeeMultiplier);
+  // Fees:  {
+  //  min: 0,
+  //  low: 0,
+  //  medium: 1,
+  //  high: 120000,
+  //  veryHigh: 10526633,
+  //  unsafeMax: 3988354006
+  //  }
 
-		logger.info("Updated Priority Fee:", {
-			rawFee: newFee,
-			adjustedFee: currentPriorityFee,
-			multiplier: priorityFeeMultiplier,
-		});
+  Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
 
-		Exchange.updatePriorityFee(currentPriorityFee);
-	} catch (error) {
-		logger.error("Error updating priority fees:", error);
-		throw error;
-	}
+  console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
 }
-
-
-
 
 /**
  * Main execution function

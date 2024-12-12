@@ -15,6 +15,9 @@ ADMIN_CHAT_ID=
 # RPC Connection
 RPC_TRADINGBOT= 
 
+# Priority Fees
+HELIUS_API_KEY=
+
 # Wallet Files (Object like [100,101,102...])
 # SolFlare exports these values as Private Key
 KEYPAIR_FILE_PATH_LONG= # /full/path/to/wallet/long.json

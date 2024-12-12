@@ -22,13 +22,7 @@ import {
 import fs from "fs";
 import dotenv from "dotenv";
 import logger from "../utils/logger.js";
-import {
-	BN,
-	PriorityFeeMethod,
-	PriorityFeeSubscriber,
-	fetchSolanaPriorityFee,
-} from "@drift-labs/sdk";
-import readline from "readline";
+import { BN } from "@drift-labs/sdk";
 
 dotenv.config();
 
@@ -140,7 +134,6 @@ export class ZetaClientWrapper {
 			await Exchange.load(loadExchangeConfig);
 			logger.info("Exchange loaded successfully");
 
-			this.setupPriorityFees();
 			this.updatePriorityFees();
 
 			return { connection };
@@ -150,93 +143,45 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async setupPriorityFees() {
-		try {
-			const config = {
-				priorityFeeMethod: PriorityFeeMethod.DRIFT,
-				frequencyMs: 5000,
-				connection: this.connection,
-			};
-
-			logger.info("Initializing Solana Priority Fees with config:", {
-				method: config.priorityFeeMethod,
-				frequency: config.frequencyMs,
-				hasConnection: !!this.connection,
-			});
-
-			this.priorityFees = new PriorityFeeSubscriber({
-				...config,
-				lookbackDistance: 150,
-				addresses: [],
-				connection: this.connection,
-			});
-
-			logger.info("Subscribing to priority fees...");
-			await this.priorityFees.subscribe();
-
-			logger.info("Loading priority fee data...");
-			await this.priorityFees.load();
-
-			const recentFees = await fetchSolanaPriorityFee(this.connection, 150, []);
-
-			logger.info("Recent Priority Fees:", {
-				numFees: recentFees?.length,
-				latestFee: recentFees?.[0]?.prioritizationFee,
-				oldestFee: recentFees?.[recentFees.length - 1]?.prioritizationFee,
-				latestSlot: recentFees?.[0]?.slot,
-				oldestSlot: recentFees?.[recentFees.length - 1]?.slot,
-			});
-
-			const initialFee =
-				recentFees
-					?.slice(0, 10)
-					.reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 || 1_000;
-
-			this.currentPriorityFee = Math.floor(
-				initialFee * this.priorityFeeMultiplier
-			);
-
-			logger.info("Priority Fees Setup Complete", {
-				subscriber: !!this.priorityFees,
-				initialFee,
-				adjustedFee: this.currentPriorityFee,
-				multiplier: this.priorityFeeMultiplier,
-			});
-		} catch (error) {
-			logger.error("Error setting up priority fees:", error);
-			throw error;
-		}
-	}
-
 	async updatePriorityFees() {
-		try {
-			if (!this.priorityFees) {
-				throw new Error("Priority Fees not initialized");
-			}
+		const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
-			await this.priorityFees.load();
+		const response = await fetch(helius_url, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "getPriorityFeeEstimate",
+				params: [
+					{
+						accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+						options: {
+							includeAllPriorityFeeLevels: true,
+						},
+					},
+				],
+			}),
+		});
 
-			const recentFees = await fetchSolanaPriorityFee(this.connection, 150, []);
+		const data = await response.json();
 
-			const newFee =
-				recentFees
-					?.slice(0, 10)
-					.reduce((sum, fee) => sum + fee.prioritizationFee, 0) / 10 ||
-				this.currentPriorityFee;
+		console.log("Current Fees: ", data.result.priorityFeeLevels);
 
-			this.currentPriorityFee = Math.floor(newFee * this.priorityFeeMultiplier);
+		// Fees:  {
+		//  min: 0,
+		//  low: 0,
+		//  medium: 1,
+		//  high: 120000,
+		//  veryHigh: 10526633,
+		//  unsafeMax: 3988354006
+		//  }
 
-			logger.info("Updated Priority Fee:", {
-				rawFee: newFee,
-				adjustedFee: this.currentPriorityFee,
-				multiplier: this.priorityFeeMultiplier,
-			});
+		Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
 
-			Exchange.updatePriorityFee(this.currentPriorityFee);
-		} catch (error) {
-			logger.error("Error updating priority fees:", error);
-			throw error;
-		}
+		console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
 	}
 
 	async getPosition(marketIndex) {
@@ -577,7 +522,7 @@ export class ZetaClientWrapper {
 				}
 
 				logger.info("Trigger Orders Cancelled. Waiting 3s...", triggerOrderTxs);
-        utils.sleep(3000);
+				utils.sleep(3000);
 			}
 
 			const settings = this.fetchSettings();
@@ -670,7 +615,6 @@ Opening ${direction} position:
 			transaction.add(mainOrderIx);
 			transaction.add(tpOrderIx);
 			transaction.add(slOrderIx);
-
 
 			const txid = await utils.processTransaction(
 				this.client.provider,
