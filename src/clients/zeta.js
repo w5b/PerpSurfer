@@ -267,11 +267,36 @@ export class ZetaClientWrapper {
 
 	async adjustStopLossOrder(newPrices, asset, positionSize) {
 		try {
+			logger.info("Starting stop loss adjustment process", {
+				asset: assets.assetToName(asset),
+				positionSize: positionSize?.toString(),
+				hasNewPrices: !!newPrices,
+			});
+
 			// Get current trigger orders
 			const triggerOrders = await this.getTriggerOrders(asset);
+			logger.info("Retrieved current trigger orders", {
+				totalOrders: triggerOrders?.length || 0,
+				orderTypes: triggerOrders?.map((order) => ({
+					bit: order.triggerOrderBit,
+					side: order.side === types.Side.BID ? "BID" : "ASK",
+					direction:
+						order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
+							? "GREATER_THAN_OR_EQUAL"
+							: "LESS_THAN_OR_EQUAL",
+				})),
+			});
+
 			const isShort = positionSize < 0;
 
-			// Find the stop loss order
+			// Find the stop loss order with detailed logging
+			logger.info("Searching for stop loss order", {
+				positionType: isShort ? "SHORT" : "LONG",
+				expectedDirection: isShort
+					? "GREATER_THAN_OR_EQUAL"
+					: "LESS_THAN_OR_EQUAL",
+			});
+
 			const stopLoss = triggerOrders.find((order) =>
 				isShort
 					? order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
@@ -279,8 +304,26 @@ export class ZetaClientWrapper {
 			);
 
 			if (!stopLoss) {
+				logger.error("Stop loss order not found in current orders");
 				throw new Error("Stop loss order not found");
 			}
+
+			logger.info("Found existing stop loss order", {
+				orderDetails: {
+					bit: stopLoss.triggerOrderBit,
+					currentOrderPrice: this.roundToTickSize(stopLoss.orderPrice / 1e6),
+					currentTriggerPrice: this.roundToTickSize(
+						stopLoss.triggerPrice / 1e6
+					),
+					size: stopLoss.size.toString(),
+					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
+					direction:
+						stopLoss.triggerDirection ===
+						types.TriggerDirection.GREATERTHANOREQUAL
+							? "GREATER_THAN_OR_EQUAL"
+							: "LESS_THAN_OR_EQUAL",
+				},
+			});
 
 			if (
 				!newPrices?.orderPrice ||
@@ -288,8 +331,25 @@ export class ZetaClientWrapper {
 				typeof newPrices.orderPrice !== "number" ||
 				typeof newPrices.triggerPrice !== "number"
 			) {
+				logger.error("Invalid price inputs", {
+					receivedPrices: newPrices,
+					orderPriceType: typeof newPrices?.orderPrice,
+					triggerPriceType: typeof newPrices?.triggerPrice,
+				});
 				throw new Error("Invalid price inputs for stop loss adjustment");
 			}
+
+			// Log price transformation process
+			logger.info("Processing new prices", {
+				input: {
+					orderPrice: newPrices.orderPrice,
+					triggerPrice: newPrices.triggerPrice,
+				},
+				decimalConversion: {
+					orderPrice: newPrices.orderPrice / 1e6,
+					triggerPrice: newPrices.triggerPrice / 1e6,
+				},
+			});
 
 			// Round the prices to tick size before converting to native integer
 			const orderPriceDecimal = this.roundToTickSize(
@@ -304,20 +364,38 @@ export class ZetaClientWrapper {
 			const triggerPriceNative =
 				utils.convertDecimalToNativeInteger(triggerPriceDecimal);
 
-			logger.info("Editing trigger order with parameters:", {
-				triggerOrderBit: stopLoss.triggerOrderBit,
+			logger.info("Price conversion complete", {
 				orderPrice: {
-					value: orderPriceNative,
+					raw: newPrices.orderPrice,
 					decimal: orderPriceDecimal,
+					native: orderPriceNative.toString(),
 				},
 				triggerPrice: {
-					value: triggerPriceNative,
+					raw: newPrices.triggerPrice,
 					decimal: triggerPriceDecimal,
+					native: triggerPriceNative.toString(),
 				},
-				size: stopLoss.size,
-				side: stopLoss.side,
-				triggerDirection: stopLoss.triggerDirection,
-				orderType: stopLoss.orderType,
+			});
+
+			logger.info("Preparing trigger order modification", {
+				bit: stopLoss.triggerOrderBit,
+				currentState: {
+					orderPrice: this.roundToTickSize(stopLoss.orderPrice / 1e6),
+					triggerPrice: this.roundToTickSize(stopLoss.triggerPrice / 1e6),
+				},
+				newState: {
+					orderPrice: orderPriceDecimal,
+					triggerPrice: triggerPriceDecimal,
+				},
+				orderDetails: {
+					size: stopLoss.size.toString(),
+					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
+					direction:
+						stopLoss.triggerDirection ===
+						types.TriggerDirection.GREATERTHANOREQUAL
+							? "GREATER_THAN_OR_EQUAL"
+							: "LESS_THAN_OR_EQUAL",
+				},
 			});
 
 			await this.client.updateState();
@@ -336,19 +414,30 @@ export class ZetaClientWrapper {
 				}
 			);
 
-			logger.info("Stop loss adjustment transaction:", {
+			logger.info("Stop loss adjustment transaction completed", {
 				success: true,
 				txid: tx,
-				orderDetails: {
+				finalOrderDetails: {
+					bit: stopLoss.triggerOrderBit,
 					newOrderPrice: orderPriceDecimal,
 					newTriggerPrice: triggerPriceDecimal,
-					size: stopLoss.size,
+					size: stopLoss.size.toString(),
+					side: stopLoss.side === types.Side.BID ? "BID" : "ASK",
+					direction:
+						stopLoss.triggerDirection ===
+						types.TriggerDirection.GREATERTHANOREQUAL
+							? "GREATER_THAN_OR_EQUAL"
+							: "LESS_THAN_OR_EQUAL",
 				},
 			});
 
 			return true;
 		} catch (error) {
-			logger.error("Failed to adjust stop loss:", error);
+			logger.error("Failed to adjust stop loss", {
+				error: error.message,
+				errorType: error.name,
+				stack: error.stack,
+			});
 			throw error;
 		}
 	}
@@ -767,9 +856,40 @@ Opening ${direction} position:
 		side,
 		makerOrTaker = "maker"
 	) {
+		// First round the decimal price to valid tick size
+		const decimalPrice = this.roundToTickSize(adjustedPrice / 1e6);
+
+		logger.info("Creating main order instruction:", {
+			market: assets.assetToName(marketIndex),
+			priceInfo: {
+				rawPrice: adjustedPrice,
+				decimal: decimalPrice,
+				native: utils.convertDecimalToNativeInteger(decimalPrice).toString(),
+			},
+			sizeInfo: {
+				nativeLotSize: nativeLotSize.toString(),
+				// Use the market's actual lot size precision
+				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
+			},
+			orderDetails: {
+				side: side === types.Side.BID ? "BID" : "ASK",
+				type: makerOrTaker === "maker" ? "POST_ONLY_SLIDE" : "LIMIT",
+				expiryOffset: 180,
+			},
+		});
+
+		const nativePrice = utils.convertDecimalToNativeInteger(decimalPrice);
+
+		logger.info("Final instruction parameters:", {
+			marketIndex,
+			price: nativePrice.toString(),
+			size: nativeLotSize.toString(),
+			orderType: makerOrTaker === "maker" ? "POSTONLYSLIDE" : "LIMIT",
+		});
+
 		return this.client.createPlacePerpOrderInstruction(
 			marketIndex,
-			utils.convertDecimalToNativeInteger(adjustedPrice),
+			nativePrice,
 			nativeLotSize,
 			side,
 			{
@@ -798,12 +918,53 @@ Opening ${direction} position:
 				? types.TriggerDirection.GREATERTHANOREQUAL
 				: types.TriggerDirection.LESSTHANOREQUAL;
 
+		// Round both prices to valid tick sizes
+		const decimalTP = this.roundToTickSize(takeProfitPrice / 1e6);
+		const decimalTrigger = this.roundToTickSize(takeProfitTrigger / 1e6);
+
+		logger.info("Creating take profit order instruction:", {
+			market: assets.assetToName(marketIndex),
+			direction,
+			priceInfo: {
+				rawTP: takeProfitPrice,
+				decimalTP,
+				nativeTP: utils.convertDecimalToNativeInteger(decimalTP).toString(),
+				rawTrigger: takeProfitTrigger,
+				decimalTrigger,
+				nativeTrigger: utils
+					.convertDecimalToNativeInteger(decimalTrigger)
+					.toString(),
+			},
+			sizeInfo: {
+				nativeLotSize: nativeLotSize.toString(),
+				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
+			},
+			orderDetails: {
+				side: tp_side === types.Side.BID ? "BID" : "ASK",
+				triggerDirection:
+					direction === "long" ? "GREATER_THAN_OR_EQUAL" : "LESS_THAN_OR_EQUAL",
+				triggerOrderBit,
+				type: "FILL_OR_KILL",
+			},
+		});
+
+		const nativeTakeProfit = utils.convertDecimalToNativeInteger(decimalTP);
+		const nativeTrigger = utils.convertDecimalToNativeInteger(decimalTrigger);
+
+		logger.info("Final TP instruction parameters:", {
+			marketIndex,
+			orderPrice: nativeTakeProfit.toString(),
+			triggerPrice: nativeTrigger.toString(),
+			size: nativeLotSize.toString(),
+			bit: triggerOrderBit,
+		});
+
 		return this.client.createPlaceTriggerOrderIx(
 			marketIndex,
-			utils.convertDecimalToNativeInteger(takeProfitPrice),
+			nativeTakeProfit,
 			nativeLotSize,
 			tp_side,
-			utils.convertDecimalToNativeInteger(takeProfitTrigger),
+			nativeTrigger,
 			triggerDirection,
 			new BN(0),
 			types.OrderType.FILLORKILL,
@@ -829,12 +990,53 @@ Opening ${direction} position:
 				? types.TriggerDirection.LESSTHANOREQUAL
 				: types.TriggerDirection.GREATERTHANOREQUAL;
 
+		// Round both prices to valid tick sizes
+		const decimalSL = this.roundToTickSize(stopLossPrice / 1e6);
+		const decimalTrigger = this.roundToTickSize(stopLossTrigger / 1e6);
+
+		logger.info("Creating stop loss order instruction:", {
+			market: assets.assetToName(marketIndex),
+			direction,
+			priceInfo: {
+				rawSL: stopLossPrice,
+				decimalSL,
+				nativeSL: utils.convertDecimalToNativeInteger(decimalSL).toString(),
+				rawTrigger: stopLossTrigger,
+				decimalTrigger,
+				nativeTrigger: utils
+					.convertDecimalToNativeInteger(decimalTrigger)
+					.toString(),
+			},
+			sizeInfo: {
+				nativeLotSize: nativeLotSize.toString(),
+				humanReadable: utils.getDecimalFromNativeInteger(nativeLotSize),
+			},
+			orderDetails: {
+				side: sl_side === types.Side.BID ? "BID" : "ASK",
+				triggerDirection:
+					direction === "long" ? "LESS_THAN_OR_EQUAL" : "GREATER_THAN_OR_EQUAL",
+				triggerOrderBit,
+				type: "FILL_OR_KILL",
+			},
+		});
+
+		const nativeStopLoss = utils.convertDecimalToNativeInteger(decimalSL);
+		const nativeTrigger = utils.convertDecimalToNativeInteger(decimalTrigger);
+
+		logger.info("Final SL instruction parameters:", {
+			marketIndex,
+			orderPrice: nativeStopLoss.toString(),
+			triggerPrice: nativeTrigger.toString(),
+			size: nativeLotSize.toString(),
+			bit: triggerOrderBit,
+		});
+
 		return this.client.createPlaceTriggerOrderIx(
 			marketIndex,
-			utils.convertDecimalToNativeInteger(stopLossPrice),
+			nativeStopLoss,
 			nativeLotSize,
 			sl_side,
-			utils.convertDecimalToNativeInteger(stopLossTrigger),
+			nativeTrigger,
 			triggerDirection,
 			new BN(0),
 			types.OrderType.FILLORKILL,
