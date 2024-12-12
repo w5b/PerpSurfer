@@ -19,6 +19,7 @@
     "fs": "0.0.1-security",
     "node-telegram-bot-api": "^0.66.0",
     "winston": "^3.17.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yargs": "^17.7.2"
   }
 }
