@@ -973,7 +973,7 @@ async function initializeExchange(markets) {
 				preflightCommitment: "finalized",
 				commitment: "finalized",
 			},
-			150,
+			25, // 50rps chainstack = 20ms delay, set to 25 for funzies
 			true,
 			connection,
 			marketsArray,

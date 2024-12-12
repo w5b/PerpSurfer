@@ -254,8 +254,8 @@ When choosing your leverage setting, consider these important factors:
 The take profit and stop loss are set as percentages of your entry price:
 
 ```javascript
-takeProfitPercentage: 0.018,  // 1.8% take profit
-stopLossPercentage: 0.025,    // 2.5% stop loss
+takeProfitPercentage: 0.036,  // 1.8% take profit
+stopLossPercentage: 0.018,    // 2.5% stop loss
 ```
 
 For example, if you enter a long position at $100:
