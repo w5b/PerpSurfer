@@ -679,20 +679,20 @@ Opening ${direction} position:
 			: price + (stopLossPrice - price) * 0.95; // Short: Entry + 95% of distance to SL
 
 		// Log calculations for verification
-		logger.info("TP/SL Price Calculations:", {
-			direction,
-			entryPrice: price,
-			takeProfit: {
-				price: takeProfitPrice,
-				trigger: takeProfitTrigger,
-				percentage: takeProfitPercentage * 100,
-			},
-			stopLoss: {
-				price: stopLossPrice,
-				trigger: stopLossTrigger,
-				percentage: stopLossPercentage * 100,
-			},
-		});
+		// console.log("TP/SL Price Calculations:", {
+		// 	direction,
+		// 	entryPrice: price,
+		// 	takeProfit: {
+		// 		price: takeProfitPrice,
+		// 		trigger: takeProfitTrigger,
+		// 		percentage: takeProfitPercentage * 100,
+		// 	},
+		// 	stopLoss: {
+		// 		price: stopLossPrice,
+		// 		trigger: stopLossTrigger,
+		// 		percentage: stopLossPercentage * 100,
+		// 	},
+		// });
 
 		return {
 			takeProfitPrice,
