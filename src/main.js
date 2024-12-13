@@ -237,29 +237,23 @@ class MultiTradingManager {
 		if (this.isProcessingQueue) return;
 		this.isProcessingQueue = true;
 
-		try {
-			while (this.messageQueue.length > 0) {
-				const signalData = this.messageQueue.shift();
+		while (this.messageQueue.length > 0) {
+			const signalData = this.messageQueue.shift();
 
-				if (!signalData?.symbol || signalData.direction === undefined) {
-					console.log("[QUEUE] Skipping invalid message:", signalData);
-					continue;
-				}
-
-				// Route to appropriate manager based on signal direction
-				const direction = signalData.direction === 1 ? "long" : "short";
-				const manager =
-					direction === "long" ? this.longManager : this.shortManager;
-
-				try {
-					await manager.processSignal(signalData);
-				} catch (error) {
-					logger.error(`[QUEUE] Error processing ${signalData.symbol}:`, error);
-				}
+			if (!signalData?.symbol || signalData.direction === undefined) {
+				console.log("[QUEUE] Skipping invalid message:", signalData);
+				continue;
 			}
-		} finally {
-			this.isProcessingQueue = false;
+
+			// Route to appropriate manager based on signal direction
+			const direction = signalData.direction === 1 ? "long" : "short";
+			const manager =
+				direction === "long" ? this.longManager : this.shortManager;
+
+			await manager.processSignal(signalData);
 		}
+
+		this.isProcessingQueue = false;
 	}
 
 	/**
@@ -386,21 +380,17 @@ class DirectionalTradingManager {
 		}
 
 		this.isProcessing = true;
-		try {
-			const manager = this.symbolManagers.get(signalData.symbol);
-			if (!manager) {
-				console.log(
-					`[${this.direction}] No manager found for ${signalData.symbol}`
-				);
-				return;
-			}
-
-			await manager.processSignal(signalData);
-		} catch (error) {
-			logger.error(`[${this.direction}] Error processing signal:`, error);
-		} finally {
-			this.isProcessing = false;
+		const manager = this.symbolManagers.get(signalData.symbol);
+		if (!manager) {
+			console.log(
+				`[${this.direction}] No manager found for ${signalData.symbol}`
+			);
+			return;
 		}
+
+		await manager.processSignal(signalData);
+
+		this.isProcessing = false;
 	}
 
 	// Inside DirectionalTradingManager class
@@ -412,40 +402,36 @@ class DirectionalTradingManager {
 		);
 
 		for (const [symbol, manager] of this.symbolManagers) {
-			try {
-				const marketIndex = constants.Asset[symbol];
-				const position = await manager.zetaWrapper.getPosition(marketIndex);
+			const marketIndex = constants.Asset[symbol];
+			const position = await manager.zetaWrapper.getPosition(marketIndex);
 
-				if (position && position.size !== 0) {
-					// Verify position direction matches this manager
-					const positionDirection = position.size > 0 ? "long" : "short";
-					if (positionDirection === this.direction) {
-						logger.info(
-							`[INIT] Found existing ${this.direction} position for ${symbol}`,
-							{
-								size: position.size,
-								entryPrice: position.costOfTrades
-									? (position.costOfTrades / position.size).toFixed(4)
-									: "N/A",
-							}
-						);
-
-						await utils.sleep(250); // Jitter
-						// Just use processSignal with a dummy signal to start monitoring if needed
-						await manager.processSignal({
-							symbol,
-							direction: positionDirection === "long" ? 1 : -1,
-							close: 0, // Price not needed for existing position check
-							signal: 0,
-						});
-					}
-				} else {
+			if (position && position.size !== 0) {
+				// Verify position direction matches this manager
+				const positionDirection = position.size > 0 ? "long" : "short";
+				if (positionDirection === this.direction) {
 					logger.info(
-						`[INIT] No existing ${this.direction} position found for ${symbol}`
+						`[INIT] Found existing ${this.direction} position for ${symbol}`,
+						{
+							size: position.size,
+							entryPrice: position.costOfTrades
+								? (position.costOfTrades / position.size).toFixed(4)
+								: "N/A",
+						}
 					);
+
+					await utils.sleep(250); // Jitter
+					// Just use processSignal with a dummy signal to start monitoring if needed
+					await manager.processSignal({
+						symbol,
+						direction: positionDirection === "long" ? 1 : -1,
+						close: 0, // Price not needed for existing position check
+						signal: 0,
+					});
 				}
-			} catch (error) {
-				logger.error(`[INIT] Error checking ${symbol} position:`, error);
+			} else {
+				logger.info(
+					`[INIT] No existing ${this.direction} position found for ${symbol}`
+				);
 			}
 		}
 	}
@@ -578,96 +564,93 @@ class SymbolTradingManager {
 		const positionId = this.generatePositionId(originalPosition);
 		if (this.isProcessing) return;
 
-		try {
-			this.isProcessing = true;
-			const currentPosition = await this.zetaWrapper.getPosition(
-				this.marketIndex
+		this.isProcessing = true;
+		const currentPosition = await this.zetaWrapper.getPosition(
+			this.marketIndex
+		);
+
+		if (!currentPosition || currentPosition.size === 0) {
+			logger.info(
+				`[${this.symbol}] Position closed or not found, stopping monitoring`
 			);
-
-			if (!currentPosition || currentPosition.size === 0) {
-				logger.info(
-					`[${this.symbol}] Position closed or not found, stopping monitoring`
-				);
-				this.stopMonitoring(positionId);
-				return;
-			}
-
-			const triggerOrders = await this.zetaWrapper.getTriggerOrders(
-				this.marketIndex
-			);
-			const isShort = currentPosition.size < 0;
-			const takeProfit = triggerOrders.find((order) =>
-				isShort
-					? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
-					: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
-			);
-
-			if (!takeProfit) {
-				logger.info(
-					`[${this.symbol}] Take profit order not found, stopping monitoring`
-				);
-				this.stopMonitoring(positionId);
-				return;
-			}
-
-			const entryPrice = Math.abs(
-				currentPosition.costOfTrades / currentPosition.size
-			);
-			const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(
-				this.marketIndex
-			);
-			const takeProfitPrice = this.zetaWrapper.roundToTickSize(
-				takeProfit.orderPrice / 1e6
-			);
-
-			const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
-			const currentDistance = isShort
-				? entryPrice - currentPrice
-				: currentPrice - entryPrice;
-			const progressPercent = currentDistance / totalDistanceToTP;
-
-			// Log only when price changes
-			if (this.lastCheckedPrice !== currentPrice) {
-				console.log(`[${this.symbol}] Position progress update`, {
-					direction: isShort ? "SHORT" : "LONG",
-					entry: entryPrice.toFixed(4),
-					current: currentPrice.toFixed(4),
-					takeProfit: takeProfitPrice.toFixed(4),
-					progress: (progressPercent * 100).toFixed(2) + "%",
-					thresholdReached: this.hasReachedThreshold,
-				});
-				this.lastCheckedPrice = currentPrice;
-			}
-
-			// Only track crossing the 60% threshold
-			if (!this.hasReachedThreshold && progressPercent >= 0.6) {
-				logger.info(
-					`[${this.symbol}] Reached 60% threshold, monitoring for close conditions`
-				);
-				this.hasReachedThreshold = true;
-			}
-
-			// After threshold, check for closing conditions
-			if (this.hasReachedThreshold) {
-				if (progressPercent >= 1.0) {
-					logger.info(
-						`[${this.symbol}] Take profit target reached, closing position`
-					);
-					await this.closeAndVerifyPosition();
-					return;
-				}
-
-				if (progressPercent <= 0.4) {
-					logger.info(
-						`[${this.symbol}] Price retraced below 40%, closing position`
-					);
-					await this.closeAndVerifyPosition();
-					return;
-				}
-			}
-		} finally {
-			this.isProcessing = false;
+			this.stopMonitoring(positionId);
+			return;
 		}
+
+		const triggerOrders = await this.zetaWrapper.getTriggerOrders(
+			this.marketIndex
+		);
+		const isShort = currentPosition.size < 0;
+		const takeProfit = triggerOrders.find((order) =>
+			isShort
+				? order.triggerDirection === types.TriggerDirection.LESSTHANOREQUAL
+				: order.triggerDirection === types.TriggerDirection.GREATERTHANOREQUAL
+		);
+
+		if (!takeProfit) {
+			logger.info(
+				`[${this.symbol}] Take profit order not found, stopping monitoring`
+			);
+			this.stopMonitoring(positionId);
+			return;
+		}
+
+		const entryPrice = Math.abs(
+			currentPosition.costOfTrades / currentPosition.size
+		);
+		const currentPrice = this.zetaWrapper.getCalculatedMarkPrice(
+			this.marketIndex
+		);
+		const takeProfitPrice = this.zetaWrapper.roundToTickSize(
+			takeProfit.orderPrice / 1e6
+		);
+
+		const totalDistanceToTP = Math.abs(takeProfitPrice - entryPrice);
+		const currentDistance = isShort
+			? entryPrice - currentPrice
+			: currentPrice - entryPrice;
+		const progressPercent = currentDistance / totalDistanceToTP;
+
+		// Log only when price changes
+		if (this.lastCheckedPrice !== currentPrice) {
+			console.log(`[${this.symbol}] Position progress update`, {
+				direction: isShort ? "SHORT" : "LONG",
+				entry: entryPrice.toFixed(4),
+				current: currentPrice.toFixed(4),
+				takeProfit: takeProfitPrice.toFixed(4),
+				progress: (progressPercent * 100).toFixed(2) + "%",
+				thresholdReached: this.hasReachedThreshold,
+			});
+			this.lastCheckedPrice = currentPrice;
+		}
+
+		// Only track crossing the 60% threshold
+		if (!this.hasReachedThreshold && progressPercent >= 0.6) {
+			logger.info(
+				`[${this.symbol}] Reached 60% threshold, monitoring for close conditions`
+			);
+			this.hasReachedThreshold = true;
+		}
+
+		// After threshold, check for closing conditions
+		if (this.hasReachedThreshold) {
+			if (progressPercent >= 1.0) {
+				logger.info(
+					`[${this.symbol}] Take profit target reached, closing position`
+				);
+				await this.closeAndVerifyPosition();
+				return;
+			}
+
+			if (progressPercent <= 0.4) {
+				logger.info(
+					`[${this.symbol}] Price retraced below 40%, closing position`
+				);
+				await this.closeAndVerifyPosition();
+				return;
+			}
+		}
+		this.isProcessing = false;
 	}
 
 	async closeAndVerifyPosition() {
