@@ -334,13 +334,14 @@ export class ZetaClientWrapper {
 					triggerOrder.triggerOrderBit
 				);
 
-				logger.info("Trigger Order Cancelled. Waiting 5s...", trigger_tx);
+				// logger.info("Trigger Order Cancelled. Waiting 5s...", trigger_tx);
 
-				await utils.sleep(5000);
+				// await utils.sleep(5000);
 
 				cancelledBits.push(triggerOrder.triggerOrderBit);
-        
-				triggerOrderTxs.push(tx);
+
+				triggerOrderTxs.push(trigger_tx);
+
 			}
 		}
 
