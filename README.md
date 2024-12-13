@@ -70,18 +70,20 @@ The bot requires dedicated trading wallets for safety and position management:
 
    Paste the respective private key arrays into each file.
 
-### 3. RPC Setup
+### 3. RPC and Priority Fees Setup
 
-A reliable RPC connection is essential for trading. We recommend using Helius:
+The bot requires two separate configurations for optimal performance: an RPC endpoint for transaction processing and a Helius API key for priority fee management.
 
-1. Visit https://helius.dev
-2. Create an account
-3. Create a new RPC endpoint
-4. Copy your RPC URL
+#### RPC Setup
+You can use any reliable RPC provider of your choice for transaction processing. Some options include:
+- Helius (https://helius.dev)
+- QuickNode (https://quicknode.com)
+- Chainstack (https://chainstack.com)
+- Or any other Solana RPC provider
 
-Configure the throttle based on your Helius tier. Open `src/main.js` and find the `initializeExchange` function. Look for the `loadExchangeConfig` section:
+When selecting an RPC provider, consider their rate limits and reliability. Configure your throttle settings based on your provider's limits:
 
-For free tier users:
+For providers with lower rate limits (like free tiers):
 ```javascript
 const loadExchangeConfig = types.defaultLoadExchangeConfig(
   Network.MAINNET,
@@ -91,7 +93,7 @@ const loadExchangeConfig = types.defaultLoadExchangeConfig(
     preflightCommitment: "finalized",
     commitment: "finalized",
   },
-  500,  // Set throttle to 500ms for free tier
+  500,  // Set throttle to 500ms for lower-tier RPCs
   true,
   connection,
   marketsArray,
@@ -100,10 +102,22 @@ const loadExchangeConfig = types.defaultLoadExchangeConfig(
 );
 ```
 
-For paid tier users (50 RPS):
+For providers with higher rate limits (e.g., 50 RPS):
 ```javascript
-  25,  // Set throttle to 25ms for paid tier with 50 RPS
+  25,  // Set throttle to 25ms for high-performance RPCs
 ```
+
+#### Priority Fees Setup
+While you can choose any RPC provider for transactions, the priority fee estimation system specifically requires a Helius API key. This is necessary even if you're using a different RPC provider for transactions. To set this up:
+
+1. Visit https://helius.dev
+2. Create a free account
+3. Generate an API key from your dashboard
+4. Save this API key for your configuration
+
+The free tier of Helius is sufficient for priority fee estimation, as this feature uses minimal API calls.
+
+This separation allows you to optimize your setup: use your preferred RPC provider for transaction processing while leveraging Helius's priority fee estimation capabilities for optimal trade execution.
 
 ### 4. Project Installation
 
@@ -136,8 +150,9 @@ pnpm install
    WS_HOST=api.nosol.lol
    WS_PORT=8080
 
-   # RPC Configuration
-   RPC_TRADINGBOT=your_helius_rpc_endpoint
+   # RPC and Priority Fee Configuration
+   RPC_TRADINGBOT=your_preferred_rpc_endpoint
+   HELIUS_API_KEY=your_helius_api_key_for_priority_fees
 
    # Wallet Paths - Update with your actual paths
    KEYPAIR_FILE_PATH_LONG=/home/yourusername/.perpsurfer/wallets/long-wallet.json
@@ -185,31 +200,95 @@ pm2 startup
 pm2 save
 ```
 
+### 8. Opening Positions Manually
+
+While the bot typically operates autonomously based on trading signals, you can also open positions manually using the included `open-position.js` script. This is useful for testing your setup or taking specific trades outside the automated system.
+
+#### Basic Usage
+
+The script accepts several command-line arguments to customize your trade. Here's a simple example:
+
+```bash
+# Open a long position in SOL with default settings
+node open-position.js -d long -s SOL
+
+# Open a short position in ETH with custom leverage
+node open-position.js -d short -s ETH -l 3
+```
+
+#### Available Parameters
+
+The script supports the following parameters to customize your trades:
+
+Required Parameters:
+- `-d, --direction`: Position direction (`long` or `short`)
+- `-s, --symbol`: Trading asset (`SOL`, `ETH`, `BTC`, etc.)
+
+Position Settings:
+- `-l, --leverage`: Leverage multiplier (default: 4)
+- `--tp, --takeProfit`: Take profit percentage (default: 0.036 = 3.6%)
+- `--sl, --stopLoss`: Stop loss percentage (default: 0.018 = 1.8%)
+- `-o, --orderType`: Order type (`maker` or `taker`, default: `taker`)
+
+#### Examples
+
+Here are some common use cases:
+
+1. Open a basic long position:
+   ```bash
+   node open-position.js -d long -s SOL
+   ```
+
+2. Open a short with custom leverage and take profit:
+   ```bash
+   node open-position.js -d short -s ETH -l 3 --tp 0.04
+   ```
+
+3. Open a position as a maker order (limit order):
+   ```bash
+   node open-position.js -d long -s BTC -o maker
+   ```
+
+4. Open a position with custom risk parameters:
+   ```bash
+   node open-position.js -d long -s SOL -l 2 --tp 0.05 --sl 0.02
+   ```
+
+#### Understanding Order Types
+
+- `taker` (default): Market orders that execute immediately at the best available price
+- `maker`: Limit orders that wait for the market to come to your price
+
+Maker orders typically have lower fees but might not fill immediately. Taker orders fill instantly but have higher fees.
+
+#### Getting Help
+
+For a full list of options and examples:
+```bash
+node open-position.js --help
+```
+
+The script will show detailed usage instructions and examples for all available parameters.
+
+#### Important Notes
+
+1. The script uses the same wallet configuration as the main bot:
+   - Long positions use the wallet specified in `KEYPAIR_FILE_PATH_LONG`
+   - Short positions use the wallet specified in `KEYPAIR_FILE_PATH_SHORT`
+
+2. Risk parameters (-l, --tp, --sl) override the default bot settings only for the manual trade.
+
+3. The script automatically handles:
+   - Priority fee optimization
+   - Take profit and stop loss order placement
+   - Position size calculation based on your wallet balance
+   - Market initialization and connection management
+
+Remember to monitor your positions after opening them, as manually opened positions aren't automatically managed by the bot's trailing stop loss system.
+
 ## Risk Management Configuration
 
 The bot's risk management system is configured through settings in the ZetaClientWrapper class. These settings control position sizing, take profits, stop losses, and trailing stop loss behavior.
-
-### Where to Configure Settings
-
-Open `src/clients/zeta.js` and locate the constructor of the ZetaClientWrapper class:
-
-```javascript
-constructor() {
-  ...
-  // Risk management settings
-  this.settings = {
-    leverageMultiplier: 4,
-    takeProfitPercentage: 0.036,
-    stopLossPercentage: 0.018,
-    trailingStopLoss: {
-      progressThreshold: 0.6,
-      stopLossDistance: 0.4,
-      triggerDistance: 0.45,
-    }
-  };
-  ...
-}
-```
 
 ### Position Size and Leverage
 
@@ -315,7 +394,6 @@ Set your *PUBLIC* key in the URL:
 - https://dex.zeta.markets/portfolio/YOUR_LONG_WALLET_PUBLIC_KEY
 
 - https://dex.zeta.markets/portfolio/YOUR_SHORT_WALLET_PUBLIC_KEY
-
 
 ## Support
 
