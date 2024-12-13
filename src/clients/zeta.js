@@ -268,27 +268,8 @@ export class ZetaClientWrapper {
 			"taker"
 		);
 
-		// Create base transaction with compute unit limit
-		let transaction = new Transaction().add(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 450_000,
-			})
-		);
-
-		try {
-			// Get and await priority fees
-			const priorityFee = await this.updatePriorityFees(true);
-			logger.info(`Setting priority fee for close position: ${priorityFee}`);
-
-			// Add priority fee instruction
-			transaction.instructions.unshift(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.round(priorityFee),
-				})
-			);
-		} catch (error) {
-			console.log(error);
-		}
+		// Create base transaction
+		let transaction = new Transaction();
 
 		// Create and add close position instruction
 		const closeInstruction = this.createMainOrderInstruction(
@@ -326,7 +307,6 @@ export class ZetaClientWrapper {
 			logger.error(`Close Position TX Error:`, error);
 		}
 	}
-
 
 	async openPositionWithTPSLVersioned(
 		direction,
@@ -406,25 +386,7 @@ export class ZetaClientWrapper {
 
 		await this.client.updateState(true, true);
 
-		let transaction = new Transaction().add(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 450_000,
-			})
-		);
-
-		try {
-			// Get priority fees and wait for the result
-			const priorityFee = await this.updatePriorityFees(true);
-
-			transaction.instructions.unshift(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.round(priorityFee),
-				})
-			);
-		} catch (error) {
-			console.log(error);
-			logger.error(`Priority Fee Update Error:`, error);
-		}
+		let transaction = new Transaction();
 
 		let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
 		let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
@@ -470,7 +432,6 @@ export class ZetaClientWrapper {
 		transaction.add(slOrderIx);
 
 		try {
-
 			const txid = await utils.processTransaction(
 				this.client.provider,
 				transaction,
@@ -487,11 +448,8 @@ export class ZetaClientWrapper {
 			logger.info(`Transaction sent successfully. txid: ${txid}`);
 
 			return txid;
-
 		} catch (error) {
-
 			logger.error(`Open Position TX Error:`, error);
-
 		}
 	}
 
