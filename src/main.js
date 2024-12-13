@@ -1,4 +1,4 @@
-import { ZetaClientWrapper, updatePriorityFees, initializeExchange } from "./clients/zeta.js";
+import { ZetaClientWrapper, initializeExchange } from "./clients/zeta.js";
 import { Connection } from "@solana/web3.js";
 import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS } from "./config/config.js";
 import logger from "./utils/logger.js";
@@ -522,7 +522,7 @@ class SymbolTradingManager {
 			}
 		);
 
-		await updatePriorityFees();
+
 
 		const tx = await this.zetaWrapper.openPositionWithTPSLVersioned(
 			this.direction,
