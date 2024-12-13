@@ -538,7 +538,7 @@ class SymbolTradingManager {
 			}
 		);
 
-		updatePriorityFees();
+		await updatePriorityFees();
 
 		const tx = await this.zetaWrapper.openPosition(
 			this.direction,
@@ -760,7 +760,7 @@ async function initializeExchange(markets) {
 	await Exchange.load(loadExchangeConfig);
 	logger.info("Exchange loaded successfully");
 
-	updatePriorityFees();
+	await updatePriorityFees();
 
 	return { connection };
 }
