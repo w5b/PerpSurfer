@@ -759,14 +759,11 @@ async function initializeExchange(markets) {
 
 	await Exchange.load(loadExchangeConfig);
 	logger.info("Exchange loaded successfully");
-
+  
+  Exchange.setUseAutoPriorityFee(false);
 	await updatePriorityFees();
 
 	return { connection };
-}
-
-async function setupPriorityFees() {
-	return true;
 }
 
 async function updatePriorityFees() {

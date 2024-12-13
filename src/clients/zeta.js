@@ -123,6 +123,7 @@ export class ZetaClientWrapper {
 		await Exchange.load(loadExchangeConfig);
 		logger.info("Exchange loaded successfully");
 
+    Exchange.setUseAutoPriorityFee(false);
 		this.updatePriorityFees();
 
 		return { connection };
