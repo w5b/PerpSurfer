@@ -325,157 +325,152 @@ export class ZetaClientWrapper {
     );
   }
   
-	async openPositionWithTPSLVersioned(
-		direction,
-		marketIndex = this.activeMarket,
-		makerOrTaker = "maker"
-	) {
-		logger.info(
-			`Opening ${direction} position for ${assets.assetToName(marketIndex)}`
-		);
-
-		await this.client.updateState(true, true);
-
-		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
-		// Keep track of cancelled bits to avoid reuse
-		const cancelledBits = [];
-
-		if (openTriggerOrders && openTriggerOrders.length > 0) {
-			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
-
-			let triggerOrderTxs = [];
-
+  async openPositionWithTPSLVersioned(
+    direction,
+    marketIndex = this.activeMarket,
+    makerOrTaker = "maker"
+  ) {
+    logger.info(
+      `Opening ${direction} position for ${assets.assetToName(marketIndex)}`
+    );
+  
+    await this.client.updateState(true, true);
+  
+    const openTriggerOrders = await this.getTriggerOrders(marketIndex);
+    // Keep track of cancelled bits to avoid reuse
+    const cancelledBits = [];
+  
+    if (openTriggerOrders && openTriggerOrders.length > 0) {
+      logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
+  
+      let triggerOrderTxs = [];
       let trigger_tx;
-
-			for (const triggerOrder of openTriggerOrders) {
-
-				trigger_tx = await this.client.cancelTriggerOrder(
-					triggerOrder.triggerOrderBit
-				);
-
-				// logger.info("Trigger Order Cancelled. Waiting 5s...", trigger_tx);
-
-				// await utils.sleep(5000);
-
-				cancelledBits.push(triggerOrder.triggerOrderBit);
-
-				triggerOrderTxs.push(trigger_tx);
-
-			}
-		}
-
-		const settings = this.fetchSettings();
-		logger.info(`Using settings:`, settings);
-
-		const balance = Exchange.riskCalculator.getCrossMarginAccountState(
-			this.client.account
-		).balance;
-		const side = direction === "long" ? types.Side.BID : types.Side.ASK;
-
-		const { currentPrice, adjustedPrice, positionSize, nativeLotSize } =
-			this.calculatePricesAndSize(
-				side,
-				marketIndex,
-				balance,
-				settings,
-				"taker"
-			);
-
-		const {
-			takeProfitPrice,
-			takeProfitTrigger,
-			stopLossPrice,
-			stopLossTrigger,
-		} = this.calculateTPSLPrices(direction, adjustedPrice, settings);
-
-		logger.info(`
-Opening ${direction} position:
-------------------------------
-    Take Profit ⟶ $${takeProfitPrice}
-                      ↑ 
-    TP Trigger ⟶ $${takeProfitTrigger}
-                      ↑ 
--------- Entry ⟶ $${adjustedPrice} -----
-                      ↓
-    SL Trigger ⟶ $${stopLossTrigger}
-                      ↓
-      SL Price ⟶ $${stopLossPrice}
-------------------------------`);
-
-		await this.client.updateState(true, true);
-
-		let transaction = new Transaction().add(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 450_000,
-			})
-		);
-
-    transaction.instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.round(this.updatePriorityFees(true)),
+  
+      for (const triggerOrder of openTriggerOrders) {
+        trigger_tx = await this.client.cancelTriggerOrder(
+          triggerOrder.triggerOrderBit
+        );
+        cancelledBits.push(triggerOrder.triggerOrderBit);
+        triggerOrderTxs.push(trigger_tx);
+      }
+    }
+  
+    const settings = this.fetchSettings();
+    logger.info(`Using settings:`, settings);
+  
+    const balance = Exchange.riskCalculator.getCrossMarginAccountState(
+      this.client.account
+    ).balance;
+    const side = direction === "long" ? types.Side.BID : types.Side.ASK;
+  
+    const { currentPrice, adjustedPrice, positionSize, nativeLotSize } =
+      this.calculatePricesAndSize(
+        side,
+        marketIndex,
+        balance,
+        settings,
+        "taker"
+      );
+  
+    const {
+      takeProfitPrice,
+      takeProfitTrigger,
+      stopLossPrice,
+      stopLossTrigger,
+    } = this.calculateTPSLPrices(direction, adjustedPrice, settings);
+  
+    logger.info(`
+  Opening ${direction} position:
+  ------------------------------
+      Take Profit ⟶ $${takeProfitPrice}
+                        ↑ 
+      TP Trigger ⟶ $${takeProfitTrigger}
+                        ↑ 
+  -------- Entry ⟶ $${adjustedPrice} -----
+                        ↓
+      SL Trigger ⟶ $${stopLossTrigger}
+                        ↓
+        SL Price ⟶ $${stopLossPrice}
+  ------------------------------`);
+  
+    await this.client.updateState(true, true);
+  
+    let transaction = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({
+        units: 450_000,
       })
     );
+  
+    // Get priority fees and wait for the result
+    const priorityFee = await this.updatePriorityFees(true);
+    
+    transaction.instructions.unshift(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.round(priorityFee),
+      })
+    );
+  
+    let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
+    let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
+      triggerBit_TP + 1
+    );
+  
+    // Forcefully increment bits if they collide with cancelled ones or exceed 127
+    while (
+      cancelledBits.includes(triggerBit_TP) ||
+      cancelledBits.includes(triggerBit_SL) ||
+      triggerBit_SL > 127
+    ) {
+      triggerBit_TP = (triggerBit_TP + 1) % 128;
+      triggerBit_SL = (triggerBit_TP + 1) % 128;
+    }
+  
+    const mainOrderIx = this.createMainOrderInstruction(
+      marketIndex,
+      adjustedPrice,
+      nativeLotSize,
+      side,
+      "taker"
+    );
+    const tpOrderIx = this.createTPOrderInstruction(
+      direction,
+      marketIndex,
+      takeProfitPrice,
+      takeProfitTrigger,
+      nativeLotSize,
+      triggerBit_TP
+    );
+    const slOrderIx = this.createSLOrderInstruction(
+      direction,
+      marketIndex,
+      stopLossPrice,
+      stopLossTrigger,
+      nativeLotSize,
+      triggerBit_SL
+    );
+  
+    transaction.add(mainOrderIx);
+    transaction.add(tpOrderIx);
+    transaction.add(slOrderIx);
+  
+    const txid = await utils.processTransaction(
+      this.client.provider,
+      transaction,
+      undefined,
+      {
+        skipPreflight: true,
+        preflightCommitment: "finalized",
+        commitment: "finalized",
+      },
+      false,
+      utils.getZetaLutArr()
+    );
+  
+    logger.info(`Transaction sent successfully. txid: ${txid}`);
+    return txid;
+  }
 
-		let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
-		let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
-			triggerBit_TP + 1
-		);
-
-		// Forcefully increment bits if they collide with cancelled ones or exceed 127
-		while (
-			cancelledBits.includes(triggerBit_TP) ||
-			cancelledBits.includes(triggerBit_SL) ||
-			triggerBit_SL > 127
-		) {
-			triggerBit_TP = (triggerBit_TP + 1) % 128;
-			triggerBit_SL = (triggerBit_TP + 1) % 128;
-		}
-
-		const mainOrderIx = this.createMainOrderInstruction(
-			marketIndex,
-			adjustedPrice,
-			nativeLotSize,
-			side,
-			"taker"
-		);
-		const tpOrderIx = this.createTPOrderInstruction(
-			direction,
-			marketIndex,
-			takeProfitPrice,
-			takeProfitTrigger,
-			nativeLotSize,
-			triggerBit_TP
-		);
-		const slOrderIx = this.createSLOrderInstruction(
-			direction,
-			marketIndex,
-			stopLossPrice,
-			stopLossTrigger,
-			nativeLotSize,
-			triggerBit_SL
-		);
-
-		transaction.add(mainOrderIx);
-		transaction.add(tpOrderIx);
-		transaction.add(slOrderIx);
-
-		const txid = await utils.processTransaction(
-			this.client.provider,
-			transaction,
-			undefined,
-			{
-				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
-			},
-			false,
-			utils.getZetaLutArr()
-		);
-
-		logger.info(`Transaction sent successfully. txid: ${txid}`);
-		return txid;
-	}
-
+  
 	async getTriggerOrders(marketIndex = this.activeMarket) {
 		const triggerOrders = await this.client.getTriggerOrders(marketIndex);
 		return triggerOrders;
