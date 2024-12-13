@@ -376,11 +376,16 @@ export class ZetaClientWrapper {
 			let trigger_tx;
 
 			for (const triggerOrder of openTriggerOrders) {
-				trigger_tx = await this.client.cancelTriggerOrder(
-					triggerOrder.triggerOrderBit
-				);
-				cancelledBits.push(triggerOrder.triggerOrderBit);
-				triggerOrderTxs.push(trigger_tx);
+				try {
+					trigger_tx = await this.client.cancelTriggerOrder(
+						triggerOrder.triggerOrderBit
+					);
+				} catch (error) {
+					logger.error(`Cancel Trigger Tx Error`, error);
+				} finally {
+					cancelledBits.push(triggerOrder.triggerOrderBit);
+					triggerOrderTxs.push(trigger_tx);
+				}
 			}
 		}
 
@@ -444,7 +449,7 @@ export class ZetaClientWrapper {
 			);
 		} catch (error) {
 			console.log(error);
-      logger.error(`Priority Fee Update Error:`, error);
+			logger.error(`Priority Fee Update Error:`, error);
 		}
 
 		let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
@@ -507,7 +512,7 @@ export class ZetaClientWrapper {
 			logger.info(`Transaction sent successfully. txid: ${txid}`);
 			return txid;
 		} catch (error) {
-      logger.error(`Open Position TX Error:`, error);
+			logger.error(`Open Position TX Error:`, error);
 		}
 	}
 
