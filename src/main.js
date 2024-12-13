@@ -526,7 +526,7 @@ class SymbolTradingManager {
 
 		await updatePriorityFees();
 
-		const tx = await this.zetaWrapper.openPosition(
+		const tx = await this.zetaWrapper.openPositionWithTPSLVersioned(
 			this.direction,
 			this.marketIndex,
 			"taker"

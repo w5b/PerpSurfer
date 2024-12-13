@@ -238,29 +238,6 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async openPosition(
-		direction,
-		marketIndex = constants.Asset.SOL,
-		makerOrTaker = "maker"
-	) {
-		logger.info(
-			`Opening ${direction} position for ${assets.assetToName(marketIndex)}`
-		);
-		const txid = await this.openPositionWithTPSLVersioned(
-			direction,
-			marketIndex,
-			makerOrTaker
-		);
-
-		logger.info(`Position opened successfully`, {
-			direction,
-			asset: assets.assetToName(marketIndex),
-			txid,
-		});
-
-		return txid;
-	}
-
 	async closePosition(marketIndex) {
 		// Update state and get current position
 		await this.client.updateState(true, true);
@@ -349,6 +326,7 @@ export class ZetaClientWrapper {
 			logger.error(`Close Position TX Error:`, error);
 		}
 	}
+
 
 	async openPositionWithTPSLVersioned(
 		direction,
@@ -492,6 +470,7 @@ export class ZetaClientWrapper {
 		transaction.add(slOrderIx);
 
 		try {
+
 			const txid = await utils.processTransaction(
 				this.client.provider,
 				transaction,
@@ -506,9 +485,13 @@ export class ZetaClientWrapper {
 			);
 
 			logger.info(`Transaction sent successfully. txid: ${txid}`);
+
 			return txid;
+
 		} catch (error) {
+
 			logger.error(`Open Position TX Error:`, error);
+
 		}
 	}
 
