@@ -268,7 +268,7 @@ export class ZetaClientWrapper {
 	}
 
   async closePosition(marketIndex) {
-    await this.client.updateState();
+    await this.client.updateState(true, true);
     const position = await this.getPosition(marketIndex);
       
     if (!position || position.size === 0) return null;
@@ -296,6 +296,20 @@ export class ZetaClientWrapper {
       closingSide,
       "taker"
     );
+
+    await this.client.updateState(true, true);
+
+		let transaction = new Transaction().add(
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 450_000,
+			})
+		);
+
+    transaction.instructions.unshift(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.round(this.updatePriorityFees(true)),
+      })
+    );
   
     return await utils.processTransaction(
       this.client.provider,
@@ -303,8 +317,8 @@ export class ZetaClientWrapper {
       undefined,
       {
         skipPreflight: true,
-        preflightCommitment: "confirmed",
-        commitment: "confirmed"
+        preflightCommitment: "finalized",
+        commitment: "finalized"
       },
       false,
       utils.getZetaLutArr()

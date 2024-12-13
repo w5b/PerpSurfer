@@ -671,44 +671,37 @@ class SymbolTradingManager {
 	}
 
 	async closeAndVerifyPosition() {
-		try {
-			logger.info(`[${this.symbol}] Attempting to close position`);
-			const txid = await this.zetaWrapper.closePosition(this.marketIndex);
-			if (!txid) {
-				logger.error(
-					`[${this.symbol}] Failed to get transaction ID for position closure`
-				);
-				return false;
-			}
-
-			logger.info(`[${this.symbol}] Close position transaction sent`, { txid });
-
-			console.log("Waiting 5s...");
-			await utils.sleep(5000);
-
-			for (let i = 0; i < 5; i++) {
-				await this.zetaWrapper.client.updateState();
-				const position = await this.zetaWrapper.getPosition(this.marketIndex);
-
-				if (!position || position.size === 0) {
-					logger.info(`[${this.symbol}] Position closure verified`);
-					this.stopMonitoring(this.generatePositionId(position));
-					return true;
-				}
-				logger.info(
-					`[${this.symbol}] Position still open, verification attempt ${
-						i + 1
-					}/5`
-				);
-				await new Promise((resolve) => setTimeout(resolve, 2000));
-			}
-
-			logger.error(`[${this.symbol}] Failed to verify position closure`);
-			return false;
-		} catch (error) {
-			logger.error(`[${this.symbol}] Error during position closure:`, error);
+		logger.info(`[${this.symbol}] Attempting to close position`);
+		const txid = await this.zetaWrapper.closePosition(this.marketIndex);
+		if (!txid) {
+			logger.error(
+				`[${this.symbol}] Failed to get transaction ID for position closure`
+			);
 			return false;
 		}
+
+		logger.info(`[${this.symbol}] Close position transaction sent`, { txid });
+
+		console.log("Waiting 5s...");
+		await utils.sleep(5000);
+
+		for (let i = 0; i < 5; i++) {
+			await this.zetaWrapper.client.updateState();
+			const position = await this.zetaWrapper.getPosition(this.marketIndex);
+
+			if (!position || position.size === 0) {
+				logger.info(`[${this.symbol}] Position closure verified`);
+				this.stopMonitoring(this.generatePositionId(position));
+				return true;
+			}
+			logger.info(
+				`[${this.symbol}] Position still open, verification attempt ${i + 1}/5`
+			);
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+
+		logger.error(`[${this.symbol}] Failed to verify position closure`);
+		return false;
 	}
 
 	// Modify stopMonitoring to work with new interval system
@@ -759,8 +752,8 @@ async function initializeExchange(markets) {
 
 	await Exchange.load(loadExchangeConfig);
 	logger.info("Exchange loaded successfully");
-  
-  Exchange.setUseAutoPriorityFee(false);
+
+	Exchange.setUseAutoPriorityFee(false);
 	await updatePriorityFees();
 
 	return { connection };
