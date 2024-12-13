@@ -302,16 +302,20 @@ export class ZetaClientWrapper {
 			})
 		);
 
-		// Get and await priority fees
-		const priorityFee = await this.updatePriorityFees(true);
-		logger.info(`Setting priority fee for close position: ${priorityFee}`);
+		try {
+			// Get and await priority fees
+			const priorityFee = await this.updatePriorityFees(true);
+			logger.info(`Setting priority fee for close position: ${priorityFee}`);
 
-		// Add priority fee instruction
-		transaction.instructions.unshift(
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.round(priorityFee),
-			})
-		);
+			// Add priority fee instruction
+			transaction.instructions.unshift(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.round(priorityFee),
+				})
+			);
+		} catch (error) {
+			console.log(error);
+		}
 
 		// Create and add close position instruction
 		const closeInstruction = this.createMainOrderInstruction(
@@ -323,27 +327,31 @@ export class ZetaClientWrapper {
 		);
 		transaction.add(closeInstruction);
 
-		// Process the transaction
-		const txid = await utils.processTransaction(
-			this.client.provider,
-			transaction,
-			undefined,
-			{
-				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
-			},
-			false,
-			utils.getZetaLutArr()
-		);
+		try {
+			// Process the transaction
+			const txid = await utils.processTransaction(
+				this.client.provider,
+				transaction,
+				undefined,
+				{
+					skipPreflight: true,
+					preflightCommitment: "finalized",
+					commitment: "finalized",
+				},
+				false,
+				utils.getZetaLutArr()
+			);
 
-		logger.info(`Position close transaction sent successfully`, {
-			asset: assets.assetToName(marketIndex),
-			size: position.size,
-			txid,
-		});
+			logger.info(`Position close transaction sent successfully`, {
+				asset: assets.assetToName(marketIndex),
+				size: position.size,
+				txid,
+			});
 
-		return txid;
+			return txid;
+		} catch (error) {
+			logger.error(`Close Position TX Error:`, error);
+		}
 	}
 
 	async openPositionWithTPSLVersioned(
@@ -376,7 +384,10 @@ export class ZetaClientWrapper {
 			}
 		}
 
+		await this.client.updateState(true, true);
+
 		const settings = this.fetchSettings();
+
 		logger.info(`Using settings:`, settings);
 
 		const balance = Exchange.riskCalculator.getCrossMarginAccountState(
@@ -422,14 +433,19 @@ export class ZetaClientWrapper {
 			})
 		);
 
-		// Get priority fees and wait for the result
-		const priorityFee = await this.updatePriorityFees(true);
+		try {
+			// Get priority fees and wait for the result
+			const priorityFee = await this.updatePriorityFees(true);
 
-		transaction.instructions.unshift(
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.round(priorityFee),
-			})
-		);
+			transaction.instructions.unshift(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.round(priorityFee),
+				})
+			);
+		} catch (error) {
+			console.log(error);
+      logger.error(`Priority Fee Update Error:`, error);
+		}
 
 		let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
 		let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
@@ -474,21 +490,25 @@ export class ZetaClientWrapper {
 		transaction.add(tpOrderIx);
 		transaction.add(slOrderIx);
 
-		const txid = await utils.processTransaction(
-			this.client.provider,
-			transaction,
-			undefined,
-			{
-				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
-			},
-			false,
-			utils.getZetaLutArr()
-		);
+		try {
+			const txid = await utils.processTransaction(
+				this.client.provider,
+				transaction,
+				undefined,
+				{
+					skipPreflight: true,
+					preflightCommitment: "finalized",
+					commitment: "finalized",
+				},
+				false,
+				utils.getZetaLutArr()
+			);
 
-		logger.info(`Transaction sent successfully. txid: ${txid}`);
-		return txid;
+			logger.info(`Transaction sent successfully. txid: ${txid}`);
+			return txid;
+		} catch (error) {
+      logger.error(`Open Position TX Error:`, error);
+		}
 	}
 
 	async getTriggerOrders(marketIndex = this.activeMarket) {
