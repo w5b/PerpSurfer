@@ -26,6 +26,80 @@ import { BN } from "@drift-labs/sdk";
 
 dotenv.config();
 
+export async function initializeExchange(markets) {
+	const connection = new Connection(process.env.RPC_TRADINGBOT);
+
+	// Create set of markets to load
+	const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
+	const marketsArray = Array.from(marketsToLoad);
+
+	const loadExchangeConfig = types.defaultLoadExchangeConfig(
+		Network.MAINNET,
+		connection,
+		{
+			skipPreflight: true,
+			preflightCommitment: "finalized",
+			commitment: "finalized",
+		},
+		25, // 50rps chainstack = 20ms delay, set to 25 for funzies
+		true,
+		connection,
+		marketsArray,
+		undefined,
+		marketsArray
+	);
+
+	await Exchange.load(loadExchangeConfig);
+  
+	logger.info("Exchange loaded successfully");
+
+	Exchange.setUseAutoPriorityFee(false);
+	await updatePriorityFees();
+
+	return { connection };
+}
+
+export async function updatePriorityFees() {
+	const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
+
+	const response = await fetch(helius_url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "getPriorityFeeEstimate",
+			params: [
+				{
+					accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+					options: {
+						includeAllPriorityFeeLevels: true,
+					},
+				},
+			],
+		}),
+	});
+
+	const data = await response.json();
+
+	console.log("Fees: ", data.result.priorityFeeLevels);
+
+	// Fees:  {
+	//  min: 0,
+	//  low: 0,
+	//  medium: 1,
+	//  high: 120000,
+	//  veryHigh: 10526633,
+	//  unsafeMax: 3988354006
+	//  }
+
+	Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
+
+	console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
+}
+
 export class ZetaClientWrapper {
 	constructor() {
 		this.client = null;
@@ -70,9 +144,10 @@ export class ZetaClientWrapper {
 		return Math.round(price / tickSize) * tickSize;
 	}
 
-	async initializeClient(keypairPath = null) {
+	async initializeClient(connection = this.connection, keypairPath = null) {
 		const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;
-		this.connection = new Connection(process.env.RPC_TRADINGBOT);
+		
+    this.connection = connection;
 
 		// Load wallet
 		const secretKeyString = fs.readFileSync(keyPath, "utf8");
@@ -95,83 +170,6 @@ export class ZetaClientWrapper {
 		);
 
 		logger.info("ZetaClientWrapper initialized successfully");
-	}
-
-	async initializeExchange(markets) {
-		const connection = new Connection(process.env.RPC_TRADINGBOT);
-
-		// Create set of markets to load
-		const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
-		const marketsArray = Array.from(marketsToLoad);
-
-		const loadExchangeConfig = types.defaultLoadExchangeConfig(
-			Network.MAINNET,
-			connection,
-			{
-				skipPreflight: true,
-				preflightCommitment: "finalized",
-				commitment: "finalized",
-			},
-			25,
-			true,
-			connection,
-			marketsArray,
-			undefined,
-			marketsArray
-		);
-
-		await Exchange.load(loadExchangeConfig);
-		logger.info("Exchange loaded successfully");
-
-		Exchange.setUseAutoPriorityFee(false);
-		this.updatePriorityFees();
-
-		return { connection };
-	}
-
-	async updatePriorityFees(returnValue = false) {
-		const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-
-		const response = await fetch(helius_url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: 1,
-				method: "getPriorityFeeEstimate",
-				params: [
-					{
-						accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
-						options: {
-							includeAllPriorityFeeLevels: true,
-						},
-					},
-				],
-			}),
-		});
-
-		const data = await response.json();
-
-		console.log("Current Fees: ", data.result.priorityFeeLevels);
-
-		// Fees:  {
-		//  min: 0,
-		//  low: 0,
-		//  medium: 1,
-		//  high: 120000,
-		//  veryHigh: 10526633,
-		//  unsafeMax: 3988354006
-		//  }
-
-		Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
-
-		console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
-
-		if (returnValue == true) {
-			return data.result.priorityFeeLevels.high;
-		}
 	}
 
 	async getPosition(marketIndex) {
@@ -268,7 +266,11 @@ export class ZetaClientWrapper {
 			"taker"
 		);
 
-		// Create base transaction
+		await this.client.updateState(true, true);
+    
+    await updatePriorityFees();
+		
+    // Create base transaction
 		let transaction = new Transaction();
 
 		// Create and add close position instruction
@@ -344,6 +346,8 @@ export class ZetaClientWrapper {
 		}
 
 		await this.client.updateState(true, true);
+
+    await updatePriorityFees();
 
 		const settings = this.fetchSettings();
 

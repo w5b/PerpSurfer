@@ -1,4 +1,4 @@
-import { ZetaClientWrapper } from "./clients/zeta.js";
+import { ZetaClientWrapper, updatePriorityFees, initializeExchange } from "./clients/zeta.js";
 import { Connection } from "@solana/web3.js";
 import { ASSETS, SYMBOLS, ACTIVE_SYMBOLS } from "./config/config.js";
 import logger from "./utils/logger.js";
@@ -120,12 +120,17 @@ class MultiTradingManager {
 			shortWallet: process.env.KEYPAIR_FILE_PATH_SHORT,
 		});
 
+    // Get all market indices at once
+		const marketIndices = this.symbols.map((symbol) => constants.Asset[symbol]);
+
+  	const { connection } = await initializeExchange(marketIndices);
+
 		// Initialize both trading directions
 		this.longManager = new DirectionalTradingManager("long", this.symbols);
-		await this.longManager.initialize();
+		await this.longManager.initialize(connection);
 
 		this.shortManager = new DirectionalTradingManager("short", this.symbols);
-		await this.shortManager.initialize();
+		await this.shortManager.initialize(connection);
 
 		// Do position check after both managers are initialized
 		logger.info("[INIT] Checking existing positions");
@@ -325,7 +330,7 @@ class DirectionalTradingManager {
 		this.zetaWrapper = null; // Shared ZetaWrapper instance
 	}
 
-	async initialize() {
+	async initialize(connection) {
 		logger.info(
 			`[INIT] Initializing ${this.direction} trading manager for:`,
 			this.symbols
@@ -338,17 +343,10 @@ class DirectionalTradingManager {
 				? process.env.KEYPAIR_FILE_PATH_LONG
 				: process.env.KEYPAIR_FILE_PATH_SHORT;
 
-		// Get all market indices at once
-		const marketIndices = this.symbols.map((symbol) => constants.Asset[symbol]);
-
 		// Initialize one client with all market indices
-		await this.zetaWrapper.initializeClient(keypairPath);
-		logger.info(
-			`[INIT] ZetaWrapper initialized for ${this.direction} trading with markets:`,
-			marketIndices.map((idx) => constants.Asset[idx])
-		);
+		await this.zetaWrapper.initializeClient(connection, keypairPath);
 
-		// Create managers for each symbol sharing the same wrapper
+    // Create managers for each symbol sharing the same wrapper
 		for (const symbol of this.symbols) {
 			const marketIndex = constants.Asset[symbol];
 			const manager = new SymbolTradingManager(
@@ -655,13 +653,8 @@ class SymbolTradingManager {
 
 	async closeAndVerifyPosition() {
 		logger.info(`[${this.symbol}] Attempting to close position`);
+
 		const txid = await this.zetaWrapper.closePosition(this.marketIndex);
-		if (!txid) {
-			logger.error(
-				`[${this.symbol}] Failed to get transaction ID for position closure`
-			);
-			return false;
-		}
 
 		logger.info(`[${this.symbol}] Close position transaction sent`, { txid });
 
@@ -710,78 +703,6 @@ class SymbolTradingManager {
 	}
 }
 
-async function initializeExchange(markets) {
-	const connection = new Connection(process.env.RPC_TRADINGBOT);
-
-	// Create set of markets to load
-	const marketsToLoad = new Set([constants.Asset.SOL, ...markets]);
-	const marketsArray = Array.from(marketsToLoad);
-
-	const loadExchangeConfig = types.defaultLoadExchangeConfig(
-		Network.MAINNET,
-		connection,
-		{
-			skipPreflight: true,
-			preflightCommitment: "finalized",
-			commitment: "finalized",
-		},
-		25, // 50rps chainstack = 20ms delay, set to 25 for funzies
-		true,
-		connection,
-		marketsArray,
-		undefined,
-		marketsArray
-	);
-
-	await Exchange.load(loadExchangeConfig);
-	logger.info("Exchange loaded successfully");
-
-	Exchange.setUseAutoPriorityFee(false);
-	await updatePriorityFees();
-
-	return { connection };
-}
-
-async function updatePriorityFees() {
-	const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
-
-	const response = await fetch(helius_url, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			jsonrpc: "2.0",
-			id: 1,
-			method: "getPriorityFeeEstimate",
-			params: [
-				{
-					accountKeys: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
-					options: {
-						includeAllPriorityFeeLevels: true,
-					},
-				},
-			],
-		}),
-	});
-
-	const data = await response.json();
-
-	console.log("Fees: ", data.result.priorityFeeLevels);
-
-	// Fees:  {
-	//  min: 0,
-	//  low: 0,
-	//  medium: 1,
-	//  high: 120000,
-	//  veryHigh: 10526633,
-	//  unsafeMax: 3988354006
-	//  }
-
-	Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
-
-	console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
-}
 
 /**
  * Main execution function
@@ -792,10 +713,6 @@ async function main() {
 	logger.info("[INIT] Starting Multi-Symbol Trading System", {
 		symbols: tradingSymbols,
 	});
-
-	// Initialize Exchange and priority fees first
-	const marketIndices = tradingSymbols.map((symbol) => constants.Asset[symbol]);
-	const { connection } = await initializeExchange(marketIndices);
 
 	const multiManager = new MultiTradingManager();
 	await multiManager.initialize(tradingSymbols);
