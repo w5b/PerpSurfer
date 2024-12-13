@@ -252,10 +252,6 @@ export class ZetaClientWrapper {
 			makerOrTaker
 		);
 
-		if (!txid) {
-			throw new Error("No transaction ID returned");
-		}
-
 		logger.info(`Position opened successfully`, {
 			direction,
 			asset: assets.assetToName(marketIndex),
