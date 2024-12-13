@@ -129,7 +129,7 @@ export class ZetaClientWrapper {
 		return { connection };
 	}
 
-	async updatePriorityFees() {
+	async updatePriorityFees(returnValue = false) {
 		const helius_url = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
 		const response = await fetch(helius_url, {
@@ -168,6 +168,10 @@ export class ZetaClientWrapper {
 		Exchange.updatePriorityFee(data.result.priorityFeeLevels.high);
 
 		console.log("Set Fee Level to high: ", data.result.priorityFeeLevels.high);
+
+    if (returnValue == true) {
+      return data.result.priorityFeeLevels.high;
+    }
 	}
 
 	async getPosition(marketIndex) {
@@ -391,6 +395,12 @@ Opening ${direction} position:
 				units: 450_000,
 			})
 		);
+
+    transaction.instructions.unshift(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Math.round(this.updatePriorityFees(true)),
+      })
+    );
 
 		let triggerBit_TP = this.client.findAvailableTriggerOrderBit();
 		let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
