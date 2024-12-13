@@ -324,10 +324,13 @@ export class ZetaClientWrapper {
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 
-			const triggerOrderTxs = [];
+			let triggerOrderTxs = [];
+
+      let trigger_tx;
 
 			for (const triggerOrder of openTriggerOrders) {
-				const tx = await this.client.cancelTriggerOrder(
+
+				trigger_tx = await this.client.cancelTriggerOrder(
 					triggerOrder.triggerOrderBit
 				);
 
