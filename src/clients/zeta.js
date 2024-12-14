@@ -262,7 +262,7 @@ export class ZetaClientWrapper {
 
 		const position = await this.getPosition(marketIndex);
 
-		const side = position.size > 0 ? types.Side.ASK : types.Side.BID;
+    const side = position.size > 0 ? types.Side.ASK : types.Side.BID;
 
 		// Early return if no position exists
 		if (!position || position.size === 0) {
@@ -272,7 +272,7 @@ export class ZetaClientWrapper {
 			return null;
 		} else {
 			logger.info(
-				`Closing ${direction} position for ${assets.assetToName(marketIndex)}`,
+				`Closing position for ${assets.assetToName(marketIndex)}`,
 				position
 			);
 		}
@@ -346,10 +346,9 @@ export class ZetaClientWrapper {
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
-      
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 
-			await this.client.cancelAllTriggerOrders(marketIndex);
+			this.client.cancelAllTriggerOrders(marketIndex);
 		}
 
 		await this.client.updateState(true, true);
@@ -556,7 +555,8 @@ export class ZetaClientWrapper {
 
 		// Convert decimal prices to native integers
 		const nativeStopLoss = utils.convertDecimalToNativeInteger(stopLossPrice);
-		const nativeSLTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
+		const nativeSLTrigger =
+			utils.convertDecimalToNativeInteger(stopLossTrigger);
 
 		return this.client.createPlaceTriggerOrderIx(
 			marketIndex,

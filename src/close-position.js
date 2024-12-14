@@ -121,7 +121,7 @@ async function closePosition() {
 
     await zetaWrapper.initializeClient(connection, walletPath);
     
-    const txid = await zetaWrapper.closePosition(argv.direction, marketIndex);
+    const txid = await zetaWrapper.closePosition(marketIndex);
     
     process.exit(0);
 
