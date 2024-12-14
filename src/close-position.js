@@ -97,12 +97,10 @@ function validateConfig() {
   }
 }
 
-
-
 /**
- * Opens a position with specified parameters
+ * Closes a position with specified parameters
  */
-async function openPosition() {
+async function closePosition() {
 
     // Validate configuration first
     validateConfig();
@@ -116,18 +114,6 @@ async function openPosition() {
     // Initialize ZetaWrapper
     const zetaWrapper = new ZetaClientWrapper();
     
-    // Set custom trading settings
-    zetaWrapper.settings = {
-      leverageMultiplier: argv.leverage,
-      takeProfitPercentage: argv.takeProfit,
-      stopLossPercentage: argv.stopLoss,
-      trailingStopLoss: {
-        progressThreshold: 0.6,
-        stopLossDistance: 0.4,
-        triggerDistance: 0.45,
-      },
-    };
-    
     // Initialize client with appropriate wallet
     const walletPath = argv.direction === "long" 
       ? process.env.KEYPAIR_FILE_PATH_LONG 
@@ -135,24 +121,7 @@ async function openPosition() {
 
     await zetaWrapper.initializeClient(connection, walletPath);
     
-    console.log("Opening position with parameters:", {
-      direction: argv.direction,
-      symbol: argv.symbol,
-      leverage: argv.leverage + "x",
-      takeProfit: (argv.takeProfit * 100).toFixed(2) + "%",
-      stopLoss: (argv.stopLoss * 100).toFixed(2) + "%",
-      orderType: argv.orderType,
-    });
-    
-    // // Open the position
-    const txid = await zetaWrapper.openPositionWithTPSLVersioned(
-      argv.direction,
-      marketIndex,
-      argv.orderType
-    );
-    
-    console.log("Position opened successfully!");
-    console.log("Transaction ID:", txid);
+    const txid = await zetaWrapper.closePosition(argv.direction, marketIndex);
     
     process.exit(0);
 
@@ -170,7 +139,7 @@ process.on("unhandledRejection", async (reason, promise) => {
 });
 
 // Start the position opening process
-openPosition().catch(async error => {
+closePosition().catch(async error => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

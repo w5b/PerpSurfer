@@ -50,7 +50,7 @@ export async function initializeExchange(markets) {
 	);
 
 	await Exchange.load(loadExchangeConfig);
-  
+
 	logger.info("Exchange loaded successfully");
 
 	Exchange.setUseAutoPriorityFee(false);
@@ -139,15 +139,35 @@ export class ZetaClientWrapper {
 		};
 	}
 
+	/**
+	 * Rounds a price to the nearest valid tick size increment
+	 * @param {number} price - The price to round
+	 * @param {number} [tickSize=0.0001] - The minimum price increment
+	 * @returns {number} The price rounded to the nearest tick size
+	 * @throws {Error} If price is not a valid number
+	 */
 	roundToTickSize(price) {
+		// Validate input
+		if (typeof price !== "number" || isNaN(price)) {
+			throw new Error("Price must be a valid number");
+		}
+
 		const tickSize = 0.0001;
-		return Math.round(price / tickSize) * tickSize;
+
+		// Round to nearest tick using Math.round for proper rounding behavior
+		// First divide by tickSize to get number of ticks
+		// Round that to nearest whole number
+		// Multiply by tickSize to get final price
+		const roundedPrice = Math.round(price / tickSize) * tickSize;
+
+		// Format to 4 decimal places to match tick size precision
+		return Number(roundedPrice.toFixed(4));
 	}
 
 	async initializeClient(connection = this.connection, keypairPath = null) {
 		const keyPath = keypairPath || process.env.KEYPAIR_FILE_PATH;
-		
-    this.connection = connection;
+
+		this.connection = connection;
 
 		// Load wallet
 		const secretKeyString = fs.readFileSync(keyPath, "utf8");
@@ -236,7 +256,83 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async closePosition(marketIndex) {
+	async closePosition(direction, marketIndex) {
+		// Update state and get current position
+		await this.client.updateState(true, true);
+
+		const position = await this.getPosition(marketIndex);
+
+		const side = direction === "long" ? types.Side.ASK : types.Side.BID;
+
+		// Early return if no position exists
+		if (!position || position.size === 0) {
+			logger.info(
+				`No position to close for ${assets.assetToName(marketIndex)}`
+			);
+			return null;
+		} else {
+			logger.info(
+				`Closing ${direction} position for ${assets.assetToName(marketIndex)}`,
+				position
+			);
+		}
+
+		const closePrice = this.getClosePrice(marketIndex, side);
+
+		// Calculate position size
+		const rawPositionSize = Math.abs(position.size);
+		const decimalMinLotSize = utils.getDecimalMinLotSize(marketIndex);
+		const lotSize = Math.floor(rawPositionSize / decimalMinLotSize);
+		const nativeLotSize = lotSize * utils.getNativeMinLotSize(marketIndex);
+		const actualPositionSize = lotSize * decimalMinLotSize;
+
+		logger.info(`Lots Debug:`, {
+			rawPositionSize,
+			decimalMinLotSize,
+			lotSize,
+			nativeLotSize,
+			actualPositionSize,
+		});
+
+		await this.client.updateState(true, true);
+
+		await updatePriorityFees();
+
+		let transaction = new Transaction();
+
+		const mainOrderIx = this.createMainOrderInstruction(
+			marketIndex,
+			closePrice,
+			nativeLotSize,
+			side,
+			"taker"
+		);
+
+		transaction.add(mainOrderIx);
+
+		try {
+			const txid = await utils.processTransaction(
+				this.client.provider,
+				transaction,
+				undefined,
+				{
+					skipPreflight: true,
+					preflightCommitment: "finalized",
+					commitment: "finalized",
+				},
+				false,
+				utils.getZetaLutArr()
+			);
+
+			logger.info(`Transaction sent successfully. txid: ${txid}`);
+
+			return txid;
+		} catch (error) {
+			logger.error(`Open Position TX Error:`, error);
+		}
+	}
+
+	async closePositionOld(marketIndex) {
 		// Update state and get current position
 		await this.client.updateState(true, true);
 		const position = await this.getPosition(marketIndex);
@@ -247,6 +343,8 @@ export class ZetaClientWrapper {
 				`No position to close for ${assets.assetToName(marketIndex)}`
 			);
 			return null;
+		} else {
+			logger.info(`Closing Position:`, position);
 		}
 
 		// Determine closing side based on current position
@@ -267,10 +365,10 @@ export class ZetaClientWrapper {
 		);
 
 		await this.client.updateState(true, true);
-    
-    await updatePriorityFees();
-		
-    // Create base transaction
+
+		await updatePriorityFees();
+
+		// Create base transaction
 		let transaction = new Transaction();
 
 		// Create and add close position instruction
@@ -322,32 +420,16 @@ export class ZetaClientWrapper {
 		await this.client.updateState(true, true);
 
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
-		// Keep track of cancelled bits to avoid reuse
-		const cancelledBits = [];
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 
-			let triggerOrderTxs = [];
-			let trigger_tx;
-
-			for (const triggerOrder of openTriggerOrders) {
-				try {
-					trigger_tx = await this.client.cancelTriggerOrder(
-						triggerOrder.triggerOrderBit
-					);
-				} catch (error) {
-					logger.error(`Cancel Trigger Tx Error`, error);
-				} finally {
-					cancelledBits.push(triggerOrder.triggerOrderBit);
-					triggerOrderTxs.push(trigger_tx);
-				}
-			}
+			await this.client.cancelAllTriggerOrders(marketIndex);
 		}
 
 		await this.client.updateState(true, true);
 
-    await updatePriorityFees();
+		await updatePriorityFees();
 
 		const settings = this.fetchSettings();
 
@@ -396,16 +478,6 @@ export class ZetaClientWrapper {
 		let triggerBit_SL = this.client.findAvailableTriggerOrderBit(
 			triggerBit_TP + 1
 		);
-
-		// Forcefully increment bits if they collide with cancelled ones or exceed 127
-		while (
-			cancelledBits.includes(triggerBit_TP) ||
-			cancelledBits.includes(triggerBit_SL) ||
-			triggerBit_SL > 127
-		) {
-			triggerBit_TP = (triggerBit_TP + 1) % 128;
-			triggerBit_SL = (triggerBit_TP + 1) % 128;
-		}
 
 		const mainOrderIx = this.createMainOrderInstruction(
 			marketIndex,
@@ -686,6 +758,38 @@ export class ZetaClientWrapper {
 			positionSize: actualPositionSize,
 			nativeLotSize,
 		};
+	}
+
+	getClosePrice(marketIndex, side) {
+		// Get orderbook data
+		Exchange.getPerpMarket(marketIndex).forceFetchOrderbook();
+		const orderbook = Exchange.getOrderbook(marketIndex);
+
+		if (!orderbook?.asks?.[0]?.price || !orderbook?.bids?.[0]?.price) {
+			throw new Error("Invalid orderbook data for price calculation");
+		}
+
+		// Calculate current price based on side
+		const currentPrice =
+			side === types.Side.BID
+				? orderbook.asks[0].price
+				: orderbook.bids[0].price;
+
+		const makerOrTaker = "taker";
+
+		// Calculate adjusted price with slippage
+		const slippage = 0.0001;
+		const closePrice = this.roundToTickSize(
+			makerOrTaker === "maker"
+				? side === types.Side.BID
+					? currentPrice + slippage
+					: currentPrice - slippage
+				: side === types.Side.BID
+				? currentPrice * (1 + slippage * 5)
+				: currentPrice * (1 - slippage * 5)
+		);
+
+		return closePrice;
 	}
 
 	createMainOrderInstruction(
