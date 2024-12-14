@@ -652,6 +652,7 @@ class SymbolTradingManager {
 	}
 
 	async closeAndVerifyPosition() {
+    
 		logger.info(`[${this.symbol}] Attempting to close position`);
 
 		const txid = await this.zetaWrapper.closePosition(this.marketIndex);

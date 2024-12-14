@@ -256,13 +256,13 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async closePosition(direction, marketIndex) {
+	async closePosition(marketIndex) {
 		// Update state and get current position
 		await this.client.updateState(true, true);
 
 		const position = await this.getPosition(marketIndex);
 
-		const side = direction === "long" ? types.Side.ASK : types.Side.BID;
+		const side = position.size > 0 ? types.Side.ASK : types.Side.BID;
 
 		// Early return if no position exists
 		if (!position || position.size === 0) {
@@ -595,7 +595,7 @@ export class ZetaClientWrapper {
 		// Convert decimal prices to native integers
 		const nativeTakeProfit =
 			utils.convertDecimalToNativeInteger(takeProfitPrice);
-		const nativeTrigger =
+		const nativeTPTrigger =
 			utils.convertDecimalToNativeInteger(takeProfitTrigger);
 
 		return this.client.createPlaceTriggerOrderIx(
@@ -603,7 +603,7 @@ export class ZetaClientWrapper {
 			nativeTakeProfit,
 			nativeLotSize,
 			tp_side,
-			nativeTrigger,
+			nativeTPTrigger,
 			triggerDirection,
 			new BN(0),
 			types.OrderType.FILLORKILL,
@@ -631,14 +631,14 @@ export class ZetaClientWrapper {
 
 		// Convert decimal prices to native integers
 		const nativeStopLoss = utils.convertDecimalToNativeInteger(stopLossPrice);
-		const nativeTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
+		const nativeSLTrigger = utils.convertDecimalToNativeInteger(stopLossTrigger);
 
 		return this.client.createPlaceTriggerOrderIx(
 			marketIndex,
 			nativeStopLoss,
 			nativeLotSize,
 			sl_side,
-			nativeTrigger,
+			nativeSLTrigger,
 			triggerDirection,
 			new BN(0),
 			types.OrderType.FILLORKILL,
