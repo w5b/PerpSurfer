@@ -332,82 +332,6 @@ export class ZetaClientWrapper {
 		}
 	}
 
-	async closePositionOld(marketIndex) {
-		// Update state and get current position
-		await this.client.updateState(true, true);
-		const position = await this.getPosition(marketIndex);
-
-		// Early return if no position exists
-		if (!position || position.size === 0) {
-			logger.info(
-				`No position to close for ${assets.assetToName(marketIndex)}`
-			);
-			return null;
-		} else {
-			logger.info(`Closing Position:`, position);
-		}
-
-		// Determine closing side based on current position
-		const closingSide = position.size > 0 ? types.Side.ASK : types.Side.BID;
-
-		// Get margin account state for price calculations
-		const balance = Exchange.riskCalculator.getCrossMarginAccountState(
-			this.client.account
-		).balance;
-
-		// Calculate closing prices and size
-		const { adjustedPrice } = this.calculatePricesAndSize(
-			closingSide,
-			marketIndex,
-			balance,
-			this.settings,
-			"taker"
-		);
-
-		await this.client.updateState(true, true);
-
-		await updatePriorityFees();
-
-		// Create base transaction
-		let transaction = new Transaction();
-
-		// Create and add close position instruction
-		const closeInstruction = this.createMainOrderInstruction(
-			marketIndex,
-			adjustedPrice,
-			Math.abs(position.size), // Use exact position size
-			closingSide,
-			"taker"
-		);
-		transaction.add(closeInstruction);
-
-		try {
-			// Process the transaction
-			const txid = await utils.processTransaction(
-				this.client.provider,
-				transaction,
-				undefined,
-				{
-					skipPreflight: true,
-					preflightCommitment: "finalized",
-					commitment: "finalized",
-				},
-				false,
-				utils.getZetaLutArr()
-			);
-
-			logger.info(`Position close transaction sent successfully`, {
-				asset: assets.assetToName(marketIndex),
-				size: position.size,
-				txid,
-			});
-
-			return txid;
-		} catch (error) {
-			logger.error(`Close Position TX Error:`, error);
-		}
-	}
-
 	async openPositionWithTPSLVersioned(
 		direction,
 		marketIndex = this.activeMarket,
@@ -422,6 +346,7 @@ export class ZetaClientWrapper {
 		const openTriggerOrders = await this.getTriggerOrders(marketIndex);
 
 		if (openTriggerOrders && openTriggerOrders.length > 0) {
+      
 			logger.info("Found Trigger Orders, Cancelling...", openTriggerOrders);
 
 			await this.client.cancelAllTriggerOrders(marketIndex);
